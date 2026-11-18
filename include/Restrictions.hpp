@@ -261,7 +261,8 @@ struct Restriction {
                 if (L1 < 1e-9) L1 = 1e-9;
                 if (L2 < 1e-9) L2 = 1e-9;
 
-                double alpha_rad = value * M_PI / 180.0;
+                constexpr double kPi = 3.14159265358979323846;
+                double alpha_rad = value * kPi / 180.0;
                 double c = std::cos(alpha_rad);
 
                 f_out[0] = (ux * vx + uy * vy) - L1 * L2 * c;
