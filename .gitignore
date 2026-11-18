@@ -1,0 +1,9 @@
+/.build/
+/.cache/
+/.emscripten-cache/
+/build/
+/node_modules/
+/test_solver
+/web/dist/
+*.log
+.DS_Store

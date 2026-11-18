@@ -1,0 +1,9 @@
+CompileFlags:
+  CompilationDatabase: .build/wasm/debug
+  Compiler: clang++
+  Add: [-std=c++17]
+---
+If:
+  PathMatch: tests/.*\.cpp
+CompileFlags:
+  CompilationDatabase: .build/native

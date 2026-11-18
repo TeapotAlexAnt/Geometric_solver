@@ -1,0 +1,9 @@
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-dangling-handle,
+  bugprone-infinite-loop,
+  bugprone-suspicious-semicolon,
+  bugprone-use-after-move
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(^|/)(include|src)/'

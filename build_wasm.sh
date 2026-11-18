@@ -1,11 +1,29 @@
 #!/usr/bin/env bash
-set -e
-echo "Сборка C++ ядра в WebAssembly через Emscripten (emcc)..."
-mkdir -p web/dist
-emcc -std=c++17 -O3 src/EmscriptenBindings.cpp \
-  -Iinclude \
-  -s WASM=1 \
-  -s ALLOW_MEMORY_GROWTH=1 \
-  -s EXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString']" \
-  -o web/dist/geom_solver.js
-echo "Готово: web/dist/geom_solver.js и web/dist/geom_solver.wasm"
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+mode="${1:-release}"
+case "$mode" in
+  debug) build_type=Debug ;;
+  release) build_type=Release ;;
+  *) echo "Usage: $0 [debug|release]" >&2; exit 2 ;;
+esac
+
+if ! command -v emcmake >/dev/null; then
+  echo "Emscripten (emcmake) is required on PATH." >&2
+  exit 1
+fi
+
+if ! command -v cmake >/dev/null; then
+  echo "CMake is required on PATH." >&2
+  exit 1
+fi
+
+build_dir="$root/.build/wasm/$mode"
+export EM_CACHE="${EM_CACHE:-$root/.build/emscripten-cache}"
+
+emcmake cmake -S "$root" -B "$build_dir" \
+  -DCMAKE_BUILD_TYPE="$build_type" \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DGEOM_EMSCRIPTEN_SYSROOT="$(em-config CACHE)/sysroot"
+cmake --build "$build_dir" --target geom_solver

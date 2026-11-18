@@ -1,27 +1,52 @@
-# Вариационный геометрический решатель (Кафедра РК6, ЛР №1)
+# Вариационный геометрический решатель (кафедра РК6, ЛР № 1)
 
-## Архитектура (по схеме бригады)
-- **Backend (C++17 / WebAssembly)**:
-  - `include/Figure.hpp`: Базовый полиморфный класс `Figure` (`params()`) и примитивы `PointFigure`, `SegmentFigure`.
-  - `include/Restrictions.hpp`: 9 геометрических ограничений с аналитическими выражениями невязок $f_j(p+\Delta p)$, первых производных $\frac{\partial f_j}{\partial \Delta p_i}$ и вторых производных $\frac{\partial^2 f_j}{\partial \Delta p_i \partial \Delta p_k}$, зашитыми в код.
-  - `include/CoreAlgo.hpp`:
-    - `CoreAlgo::solve(A, b)` — собственная реализация решения СЛАУ методом Гаусса с выбором главного элемента без сторонних библиотек.
-    - `CoreAlgo::optimize(f, df, params)` — решение оптимизационной задачи Лагранжа на основе принципа наименьших изменений методом Ньютона–Рафсона.
-  - `include/GeomRepository.hpp`: Хранилище примитивов `Geom` и ограничений `Restrictions`, а также `JSON Serializer`.
-  - `include/HelperFunctions.hpp`: Модуль `query` (поиск объектов по координатам, вычисление степеней свободы `DOF`).
-  - `include/GeomSolver.hpp`: Модуль `solve(geom, restrictions, new_restrictions) -> new_geom`.
-  - `include/UseCases.hpp` и `src/EmscriptenBindings.cpp`: `Render Usecase`, `Tool_1 Usecase`, `Pointer Usecase` и `API Handler` (`getAllPrimitives`, экспорт в WASM).
-- **Visualization (JS / HTML5 Canvas)**:
-  - Рабочее поле (CAD Canvas с сеткой, привязкой, масштабированием, размерными выносками и иконками ограничений).
-  - Панель инструментов (создание/удаление точек и отрезков, наложение 9 типов ограничений, готовые демо-эскизы).
-  - Браузер ограничений и инспектор матрицы Якоби / СЛАУ.
+## Запуск и отладка
 
-## Сборка и запуск тестов
-1. Проверка математического ядра на C++ (g++):
-   ```bash
-   g++ -std=c++17 -O2 tests/test_solver.cpp -o test_solver && ./test_solver
-   ```
-2. Компиляция в WebAssembly (Emscripten):
-   ```bash
-   ./build_wasm.sh
-   ```
+Нужны Node.js 20.19+ (ветка 20) или 22.12+, npm, CMake 3.14+ и Emscripten в `PATH`.
+
+```bash
+./dev.sh
+```
+
+Откройте [http://127.0.0.1:5173](http://127.0.0.1:5173) или адрес, который напечатал Vite. Скрипт устанавливает зависимости из `package-lock.json` при первом запуске. Vite собирает debug-WASM при старте, подхватывает изменения JS и CSS и перезагружает страницу после пересборки C++. Порт можно задать через `./dev.sh --port 5174`.
+
+- **JavaScript.** В DevTools → Sources ставьте точки останова в модулях `web/src/`.
+- **C++/WASM.** Debug-сборка содержит DWARF. Для точек останова в C++ установите расширение **C/C++ DevTools Support (DWARF)** для Chrome и разрешите ему доступ к файловым URL. После перезагрузки откройте исходник в Sources и воспроизведите действие в редакторе. Например, кнопка «Пересчитать СЛАУ» вызывает код из `src/CoreAlgo.cpp`. [Руководство Chrome](https://developer.chrome.com/docs/devtools/wasm)
+- **clangd.** `.clangd` выбирает базу команд компиляции из `.build/wasm/debug`. Её создаёт `./dev.sh` или `./build_wasm.sh debug`. Для `tests/` используется нативная база из команды ниже.
+
+## Сборка и тесты
+
+```bash
+npm ci
+npm run build
+npm run preview
+```
+
+`npm run build` собирает release-WASM и готовый сайт в `web/dist/`. Для отдельной сборки ядра используйте `./build_wasm.sh`. Файлы `geom_solver.mjs` и `geom_solver.wasm` появятся в `.build/wasm/release/`.
+
+```bash
+cmake -S . -B .build/native -DCMAKE_BUILD_TYPE=Debug -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build .build/native
+ctest --test-dir .build/native --output-on-failure
+```
+
+Установите `clang-format` и `clang-tidy` из LLVM, чтобы использовать команды проверки кода. CMake также ищет их в стандартных каталогах Homebrew.
+
+```bash
+cmake --build .build/native --target format       # форматирует исходники и заголовки
+cmake --build .build/native --target format-check # проверяет форматирование
+cmake --build .build/native --target tidy         # анализирует ядро и тесты
+cmake --build .build/wasm/debug --target tidy     # анализирует ядро и WASM-привязки
+```
+
+## Архитектура
+
+Автор схемы — Георгий Жуков.
+
+![Архитектура Geometric Solver](docs/architecture.png)
+
+**Backend (C++17 → WASM).** `GeomRepository` хранит `Geom = Figure[]` и ограничения, сериализует эскиз в JSON. Каждый `Figure` предоставляет `params()`. В редакторе можно выделять точки и отрезки. `HelperFunctions` выполняет поиск по координатам курсора и вычисляет число степеней свободы. `GeomSolver` строит задачу с учётом текущих и новых ограничений. `CoreAlgo` решает СЛАУ методом Гаусса и вычисляет поправки методом Ньютона для системы Лагранжа. Заголовки находятся в `include/`, реализации — в `src/`.
+
+**Editor API.** `ApiHandler` объединяет Render Usecase, Tool_1 Usecase и Pointer Usecase. Привязки в `src/wasm/` экспортируют API. Визуализация получает точки, отрезки, ограничения и диагностику решателя через `getAllPrimitives()`. Поиск, команды редактирования и импорт эскиза передаются в ядро через тот же API. Импорт принимает как прежний браузерный JSON с массивами `points` и `segments`, так и JSON репозитория с массивом `primitives`.
+
+**Visualization (JavaScript, Vite, SVG).** Модули `web/src/` отвечают за рабочее поле, инструменты, браузер ограничений и инспектор матрицы. `sketch-view.js` строит SVG из снимка, который `editor-api.js` получает через WASM. Выбор примитива по координатам выполняет ядро.

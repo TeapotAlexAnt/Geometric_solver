@@ -1,7 +1,7 @@
 #include "../include/UseCases.hpp"
-#include <iostream>
 #include <cassert>
 #include <cmath>
+#include <iostream>
 
 using namespace cad;
 
@@ -48,16 +48,16 @@ int main() {
         api.applyRestriction(static_cast<int>(RestrictionType::HORIZONTAL), {p1, p2}, {s1}, 0.0);
         api.applyRestriction(static_cast<int>(RestrictionType::VERTICAL), {p4, p1}, {s4}, 0.0);
         api.applyRestriction(static_cast<int>(RestrictionType::PARALLEL), {p1, p2, p4, p3}, {s1, s3}, 0.0);
-        api.applyRestriction(static_cast<int>(RestrictionType::PERPENDICULAR), {p1, p2, p2, p3}, {s1, s2}, 0.0);
+        api.applyRestriction(static_cast<int>(RestrictionType::PERPENDICULAR), {p1, p2, p2, p3}, {s1, s2},
+                             0.0);
         api.applyRestriction(static_cast<int>(RestrictionType::DISTANCE), {p1, p2}, {s1}, 120.0);
         api.applyRestriction(static_cast<int>(RestrictionType::DISTANCE), {p2, p3}, {s2}, 80.0);
 
         PointFigure* pt2 = api.getRepository().findPoint(p2);
         PointFigure* pt3 = api.getRepository().findPoint(p3);
         PointFigure* pt4 = api.getRepository().findPoint(p4);
-        std::cout << "[Тест 2: Прямоугольник 120x80] P2=(" << pt2->x << ", " << pt2->y
-                  << "), P3=(" << pt3->x << ", " << pt3->y
-                  << "), P4=(" << pt4->x << ", " << pt4->y << ")" << std::endl;
+        std::cout << "[Тест 2: Прямоугольник 120x80] P2=(" << pt2->x << ", " << pt2->y << "), P3=(" << pt3->x
+                  << ", " << pt3->y << "), P4=(" << pt4->x << ", " << pt4->y << ")" << std::endl;
         assert(std::fabs(pt2->x - 120.0) < 1e-4 && std::fabs(pt2->y - 0.0) < 1e-4);
         assert(std::fabs(pt3->x - 120.0) < 1e-4 && std::fabs(pt3->y - 80.0) < 1e-4);
         assert(std::fabs(pt4->x - 0.0) < 1e-4 && std::fabs(pt4->y - 80.0) < 1e-4);
@@ -92,8 +92,8 @@ int main() {
         PointFigure* ptm = api.getRepository().findPoint(p_mid);
         double cross_line = (ptm->x - pt3->x) * (pt4->y - ptm->y) - (pt4->x - ptm->x) * (ptm->y - pt3->y);
         std::cout << "[Тест 3: Совпадение + Угол 60° + Точка на прямой] P3=(" << pt3->x << ", " << pt3->y
-                  << "), P4=(" << pt4->x << ", " << pt4->y
-                  << "), P_mid=(" << ptm->x << ", " << ptm->y << "), cross=" << cross_line << std::endl;
+                  << "), P4=(" << pt4->x << ", " << pt4->y << "), P_mid=(" << ptm->x << ", " << ptm->y
+                  << "), cross=" << cross_line << std::endl;
         assert(std::hypot(pt3->x, pt3->y) < 1e-4);
         assert(std::fabs(pt4->x - 50.0) < 1e-3);
         assert(std::fabs(pt4->y - 86.60254) < 1e-3);
