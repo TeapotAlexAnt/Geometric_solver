@@ -1,0 +1,2633 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Вариационный геометрический решатель — САПР РК6 (C++ / Emscripten WASM / JS)</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: #0b0f19;
+      color: #e2e8f0;
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+    }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    .tool-btn {
+      transition: all 0.15s ease;
+    }
+    .tool-btn.active {
+      background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+      color: #ffffff;
+      border-color: #60a5fa;
+      box-shadow: 0 0 12px rgba(37, 99, 235, 0.45);
+    }
+    .constraint-btn {
+      transition: all 0.15s ease;
+    }
+    .constraint-btn.active {
+      background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%);
+      color: #ffffff;
+      border-color: #2dd4bf;
+      box-shadow: 0 0 12px rgba(20, 184, 166, 0.45);
+    }
+    canvas {
+      touch-action: none;
+      user-select: none;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-950 text-slate-100">
+
+  <!-- ВЕРХНЯЯ ПАНЕЛЬ НАВИГАЦИИ И СТАТУСА РЕШАТЕЛЯ -->
+  <header class="border-b border-slate-800 bg-slate-900/95 backdrop-blur px-3 py-2 flex flex-wrap items-center justify-between gap-2 z-20">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center shadow-md shadow-blue-900/40 font-bold text-white text-sm tracking-tight">
+        РК6
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-sm sm:text-base font-bold text-white tracking-tight">CAD Variational Sketcher</h1>
+          <span id="wasmStatusBadge" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            WASM CoreAlgo Активен
+          </span>
+        </div>
+        <p class="text-[11px] text-slate-400 hidden sm:block">
+          Вариационный геометрический решатель • Метод множителей Лагранжа • Аналитическая матрица Якоби
+        </p>
+      </div>
+    </div>
+
+    <!-- Индикаторы состояния геометрической модели (Слайды 16-17 презентации РК6) -->
+    <div class="flex flex-wrap items-center gap-2 text-xs">
+      <div class="px-2.5 py-1 rounded-md bg-slate-800/90 border border-slate-700/80 flex items-center gap-1.5">
+        <span class="text-slate-400">Состояние:</span>
+        <span id="equilibriumBadge" class="font-semibold text-emerald-400">Равновесное</span>
+      </div>
+      <div class="px-2.5 py-1 rounded-md bg-slate-800/90 border border-slate-700/80 flex items-center gap-1.5">
+        <span class="text-slate-400">DOF:</span>
+        <span id="dofValue" class="mono font-semibold text-sky-400">0</span>
+        <span id="modelDefBadge" class="text-[11px] text-slate-300">(Полностью определена)</span>
+      </div>
+      <div class="px-2.5 py-1 rounded-md bg-slate-800/90 border border-slate-700/80 hidden md:flex items-center gap-2 mono text-[11px]">
+        <span class="text-slate-400">Итер: <strong id="iterValue" class="text-slate-200">0</strong></span>
+        <span class="text-slate-600">|</span>
+        <span class="text-slate-400">‖f‖∞: <strong id="residualValue" class="text-emerald-400">0.00e+0</strong></span>
+      </div>
+    </div>
+
+    <!-- Переключатель вкладок приложения -->
+    <div class="flex items-center gap-1 bg-slate-800/90 p-1 rounded-lg border border-slate-700">
+      <button id="tabBtnEditor" class="px-3 py-1 rounded-md text-xs font-medium bg-blue-600 text-white transition">
+        Рабочее поле
+      </button>
+      <button id="tabBtnMatrix" class="px-3 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-white transition">
+        СЛАУ и Матрица Якоби
+      </button>
+      <button id="tabBtnArch" class="px-3 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-white transition">
+        Архитектура &amp; C++ Код
+      </button>
+    </div>
+  </header>
+
+  <!-- ВКЛАДКА 1: ГРАФИЧЕСКИЙ РЕДАКТОР (ПАПКИ: ПАНЕЛЬ ИНСТРУМЕНТОВ + РАБОЧЕЕ ПОЛЕ + БРАУЗЕР ОГРАНИЧЕНИЙ) -->
+  <main id="viewEditor" class="flex-1 flex flex-col lg:flex-row overflow-hidden">
+
+    <!-- ЛЕВАЯ КОЛОНКА: ПАНЕЛЬ ИНСТРУМЕНТОВ (Tool_1 Usecase & Pointer Usecase) -->
+    <aside class="w-full lg:w-64 xl:w-72 border-b lg:border-b-0 lg:border-r border-slate-800 bg-slate-900/80 p-3 flex flex-col gap-3 overflow-y-auto shrink-0">
+
+      <!-- Секция 1: Инструменты геометрии -->
+      <div>
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Панель инструментов</span>
+          <span class="text-[10px] mono text-slate-500">Tool_1 / Pointer</span>
+        </div>
+        <div class="grid grid-cols-2 gap-1.5">
+          <button id="toolSelect" data-tool="select" class="tool-btn active flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium bg-slate-800/90 border border-slate-700/80 hover:border-slate-500 text-left">
+            <span class="text-base leading-none">↖</span>
+            <div>
+              <div class="font-semibold">Курсор</div>
+              <div class="text-[10px] opacity-75">Выбор / Двигать</div>
+            </div>
+          </button>
+          <button id="toolPoint" data-tool="point" class="tool-btn flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium bg-slate-800/90 border border-slate-700/80 hover:border-slate-500 text-left">
+            <span class="text-base leading-none text-sky-400">●</span>
+            <div>
+              <div class="font-semibold">Точка</div>
+              <div class="text-[10px] opacity-75">Создать P(x,y)</div>
+            </div>
+          </button>
+          <button id="toolSegment" data-tool="segment" class="tool-btn flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium bg-slate-800/90 border border-slate-700/80 hover:border-slate-500 text-left">
+            <span class="text-base leading-none text-indigo-400">╱</span>
+            <div>
+              <div class="font-semibold">Отрезок</div>
+              <div class="text-[10px] opacity-75">2 точки P1–P2</div>
+            </div>
+          </button>
+          <button id="toolDelete" data-tool="delete" class="tool-btn flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium bg-slate-800/90 border border-slate-700/80 hover:border-rose-500/60 text-left">
+            <span class="text-base leading-none text-rose-400">✕</span>
+            <div>
+              <div class="font-semibold">Удалить</div>
+              <div class="text-[10px] opacity-75">Клик по объекту</div>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Секция 2: 9 Геометрических ограничений (Слайды 28-29) -->
+      <div>
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Ограничения (9 типов)</span>
+          <span class="text-[10px] text-teal-400 font-medium">Клик или выбор</span>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-1.5">
+          <button data-constraint="COINCIDENT" class="constraint-btn flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs bg-slate-800/80 border border-slate-700/80 hover:border-teal-500/60 text-left">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 flex items-center justify-center font-bold mono text-xs">◎</span>
+              <div>
+                <div class="font-medium text-slate-100">1. Совпадение точек</div>
+                <div class="text-[10px] text-slate-400">Выберите 2 точки (2 ур.)</div>
+              </div>
+            </div>
+          </button>
+
+          <button data-constraint="DISTANCE" class="constraint-btn flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs bg-slate-800/80 border border-slate-700/80 hover:border-teal-500/60 text-left">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded bg-sky-500/15 border border-sky-500/30 text-sky-300 flex items-center justify-center font-bold mono text-xs">↔</span>
+              <div>
+                <div class="font-medium text-slate-100">2. Расстояние / Длина</div>
+                <div class="text-[10px] text-slate-400">2 точки или 1 отрезок (d)</div>
+              </div>
+            </div>
+          </button>
+
+          <button data-constraint="PARALLEL" class="constraint-btn flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs bg-slate-800/80 border border-slate-700/80 hover:border-teal-500/60 text-left">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 flex items-center justify-center font-bold mono text-xs">∥</span>
+              <div>
+                <div class="font-medium text-slate-100">3. Параллельность</div>
+                <div class="text-[10px] text-slate-400">2 отрезка (v₁₂ × v₃₄ = 0)</div>
+              </div>
+            </div>
+          </button>
+
+          <button data-constraint="PERPENDICULAR" class="constraint-btn flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs bg-slate-800/80 border border-slate-700/80 hover:border-teal-500/60 text-left">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded bg-purple-500/15 border border-purple-500/30 text-purple-300 flex items-center justify-center font-bold mono text-xs">⊥</span>
+              <div>
+                <div class="font-medium text-slate-100">4. Перпендикулярность</div>
+                <div class="text-[10px] text-slate-400">2 отрезка (v₁₂ · v₃₄ = 0)</div>
+              </div>
+            </div>
+          </button>
+
+          <button data-constraint="VERTICAL" class="constraint-btn flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs bg-slate-800/80 border border-slate-700/80 hover:border-teal-500/60 text-left">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center font-bold mono text-xs">V</span>
+              <div>
+                <div class="font-medium text-slate-100">5. Вертикальность</div>
+                <div class="text-[10px] text-slate-400">1 отрезок (x₂ − x₁ = 0)</div>
+              </div>
+            </div>
+          </button>
+
+          <button data-constraint="HORIZONTAL" class="constraint-btn flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs bg-slate-800/80 border border-slate-700/80 hover:border-teal-500/60 text-left">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center font-bold mono text-xs">H</span>
+              <div>
+                <div class="font-medium text-slate-100">6. Горизонтальность</div>
+                <div class="text-[10px] text-slate-400">1 отрезок (y₂ − y₁ = 0)</div>
+              </div>
+            </div>
+          </button>
+
+          <button data-constraint="ANGLE" class="constraint-btn flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs bg-slate-800/80 border border-slate-700/80 hover:border-teal-500/60 text-left">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded bg-pink-500/15 border border-pink-500/30 text-pink-300 flex items-center justify-center font-bold mono text-xs">∠</span>
+              <div>
+                <div class="font-medium text-slate-100">7. Угол между отрезками</div>
+                <div class="text-[10px] text-slate-400">2 отрезка (угол α°)</div>
+              </div>
+            </div>
+          </button>
+
+          <button data-constraint="POINT_ON_LINE" class="constraint-btn flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs bg-slate-800/80 border border-slate-700/80 hover:border-teal-500/60 text-left">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 flex items-center justify-center font-bold mono text-xs">∈</span>
+              <div>
+                <div class="font-medium text-slate-100">8. Точка на прямой</div>
+                <div class="text-[10px] text-slate-400">1 точка + 1 отрезок</div>
+              </div>
+            </div>
+          </button>
+
+          <button data-constraint="FIX_POINT" class="constraint-btn flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs bg-slate-800/80 border border-slate-700/80 hover:border-teal-500/60 text-left">
+            <div class="flex items-center gap-2">
+              <span class="w-6 h-6 rounded bg-rose-500/15 border border-rose-500/30 text-rose-300 flex items-center justify-center font-bold mono text-xs">🔒</span>
+              <div>
+                <div class="font-medium text-slate-100">9. Фиксация точки</div>
+                <div class="text-[10px] text-slate-400">1 точка (x=x_c, y=y_c)</div>
+              </div>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Секция 3: Готовые контрольные примеры (пресеты) -->
+      <div class="border-t border-slate-800 pt-2.5">
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Контрольные примеры</div>
+        <div class="flex flex-col gap-1.5">
+          <button id="presetSlide30" class="px-2.5 py-1.5 rounded-md text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition flex items-center justify-between">
+            <span>Слайд 30: Отрезок L=50 + Фикс.</span>
+            <span class="text-[10px] mono text-sky-400">Лекция</span>
+          </button>
+          <button id="presetRect" class="px-2.5 py-1.5 rounded-md text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition flex items-center justify-between">
+            <span>Прямоугольник 180×110 (H,V,∥,⊥)</span>
+            <span class="text-[10px] mono text-emerald-400">Слайд 12</span>
+          </button>
+          <button id="presetAll9" class="px-2.5 py-1.5 rounded-md text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition flex items-center justify-between">
+            <span>Все 9 ограничений (Демо-стенд)</span>
+            <span class="text-[10px] mono text-amber-400">Полный</span>
+          </button>
+          <button id="presetLinkage" class="px-2.5 py-1.5 rounded-md text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition flex items-center justify-between">
+            <span>Четырёхзвенник (Крутить мышью)</span>
+            <span class="text-[10px] mono text-purple-400">DOF=1</span>
+          </button>
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- ЦЕНТРАЛЬНАЯ КОЛОНКА: РАБОЧЕЕ ПОЛЕ (CAD CANVAS) -->
+    <section class="flex-1 flex flex-col relative bg-slate-950 min-h-[420px]">
+
+      <!-- Верхняя панель холста (подсказка активного режима + управление видом) -->
+      <div class="px-3 py-2 bg-slate-900/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div class="flex items-center gap-2">
+          <span id="modePromptBadge" class="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 font-medium">
+            Режим: Курсор
+          </span>
+          <span id="modeHintText" class="text-slate-300">
+            Перетаскивайте точки или отрезки мышью — решатель пересчитывает геометрию в реальном времени.
+          </span>
+        </div>
+
+        <div class="flex items-center gap-1.5">
+          <label class="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-slate-800 border border-slate-700 cursor-pointer text-[11px] text-slate-300">
+            <input id="snapGridToggle" type="checkbox" class="rounded accent-blue-500" />
+            <span>Сетка 10 мм</span>
+          </label>
+          <button id="btnSolveNow" class="px-2.5 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 font-medium transition">
+            Пересчитать СЛАУ
+          </button>
+          <button id="btnResetView" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition" title="Сбросить масштаб">
+            100%
+          </button>
+          <button id="btnClearCanvas" class="px-2 py-1 rounded bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 transition">
+            Очистить
+          </button>
+        </div>
+      </div>
+
+      <!-- Сам HTML5 Canvas -->
+      <div id="canvasContainer" class="flex-1 relative overflow-hidden">
+        <canvas id="cadCanvas" class="w-full h-full block cursor-crosshair"></canvas>
+
+        <!-- Плавающая карточка ввода числового параметра (для DISTANCE, ANGLE, FIX_POINT) -->
+        <div id="paramModal" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-30 bg-slate-900/95 backdrop-blur border border-teal-500/50 rounded-xl shadow-2xl p-3.5 w-80">
+          <div class="flex items-center justify-between mb-2">
+            <h3 id="paramModalTitle" class="text-xs font-bold text-teal-300 uppercase tracking-wider">Параметр ограничения</h3>
+            <button id="paramModalCancel" class="text-slate-400 hover:text-white text-sm">✕</button>
+          </div>
+          <p id="paramModalDesc" class="text-xs text-slate-300 mb-2.5">Введите требуемое значение:</p>
+          <div class="flex flex-col gap-2 mb-3">
+            <div>
+              <label id="paramInput1Label" class="block text-[11px] text-slate-400 mb-1">Значение (d или α°):</label>
+              <input id="paramInput1" type="number" step="any" class="w-full px-2.5 py-1.5 rounded bg-slate-800 border border-slate-700 text-white mono text-xs focus:outline-none focus:border-teal-400" />
+            </div>
+            <div id="paramInput2Wrapper" class="hidden">
+              <label id="paramInput2Label" class="block text-[11px] text-slate-400 mb-1">Координата Y (y_c):</label>
+              <input id="paramInput2" type="number" step="any" class="w-full px-2.5 py-1.5 rounded bg-slate-800 border border-slate-700 text-white mono text-xs focus:outline-none focus:border-teal-400" />
+            </div>
+          </div>
+          <div class="flex justify-end gap-2">
+            <button id="paramModalCloseBtn" class="px-3 py-1 rounded text-xs bg-slate-800 hover:bg-slate-700 text-slate-300">Отмена</button>
+            <button id="paramModalApplyBtn" class="px-3 py-1 rounded text-xs bg-teal-600 hover:bg-teal-500 text-white font-semibold">Применить и решить СЛАУ</button>
+          </div>
+        </div>
+
+        <!-- Нижняя строка координат курсора и подсказки выбора -->
+        <div class="absolute bottom-2 left-3 right-3 pointer-events-none flex flex-wrap items-center justify-between gap-2 text-[11px]">
+          <div class="px-2.5 py-1 rounded bg-slate-900/85 border border-slate-800 text-slate-300 mono pointer-events-auto">
+            Курсор: X=<span id="cursorX">0.0</span>, Y=<span id="cursorY">0.0</span> мм
+            <span class="text-slate-600 mx-1">|</span>
+            Масштаб: <span id="zoomLabel">100%</span>
+          </div>
+          <div id="selectionSummaryBadge" class="px-2.5 py-1 rounded bg-slate-900/85 border border-slate-800 text-slate-300 pointer-events-auto">
+            Выделено: нет (кликните по точке или отрезку, Shift+клик — несколько)
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ПРАВАЯ КОЛОНКА: БРАУЗЕР ОГРАНИЧЕНИЙ И РЕПОЗИТОРИЙ ПРИМИТИВОВ (GeomRepository) -->
+    <aside class="w-full lg:w-80 xl:w-96 border-t lg:border-t-0 lg:border-l border-slate-800 bg-slate-900/80 flex flex-col shrink-0 max-h-[50vh] lg:max-h-none">
+
+      <!-- Переключатель вкладок браузера -->
+      <div class="flex border-b border-slate-800 bg-slate-900 px-2 pt-2 gap-1">
+        <button id="rightTabRestrictions" class="flex-1 py-1.5 px-2 text-xs font-semibold rounded-t-md bg-slate-800 text-teal-300 border-b-2 border-teal-400">
+          Браузер ограничений (<span id="countRestrictions">0</span>)
+        </button>
+        <button id="rightTabPrimitives" class="flex-1 py-1.5 px-2 text-xs font-semibold rounded-t-md text-slate-400 hover:text-slate-200">
+          Примитивы Geom (<span id="countPrimitives">0</span>)
+        </button>
+        <button id="rightTabJson" class="py-1.5 px-2.5 text-xs font-semibold rounded-t-md text-slate-400 hover:text-slate-200 mono">
+          JSON
+        </button>
+      </div>
+
+      <!-- Содержимое вкладки 1: Список ограничений (Restrictions) -->
+      <div id="panelRestrictions" class="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+        <div id="restrictionsList" class="flex flex-col gap-2"></div>
+      </div>
+
+      <!-- Содержимое вкладки 2: Список точек и отрезков (Geom = Figure[]) -->
+      <div id="panelPrimitives" class="hidden flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+        <div id="primitivesList" class="flex flex-col gap-2"></div>
+      </div>
+
+      <!-- Содержимое вкладки 3: JSON Сериализатор (serializer -> JSON на схеме) -->
+      <div id="panelJson" class="hidden flex-1 overflow-y-auto p-3 flex flex-col gap-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-purple-300">GeomRepository JSON Serializer</span>
+          <div class="flex gap-1.5">
+            <button id="btnCopyJson" class="px-2 py-1 rounded text-[11px] bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200">Копировать</button>
+            <button id="btnLoadJson" class="px-2 py-1 rounded text-[11px] bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-200">Загрузить из поля</button>
+          </div>
+        </div>
+        <textarea id="jsonSerializerArea" rows="16" class="w-full flex-1 p-2 rounded bg-slate-950 border border-slate-800 text-[11px] mono text-slate-300 focus:outline-none focus:border-purple-500"></textarea>
+      </div>
+
+      <!-- Нижний блок аналитической сводки СЛАУ -->
+      <div class="p-3 border-t border-slate-800 bg-slate-950/70 text-[11px] flex flex-col gap-1">
+        <div class="flex items-center justify-between">
+          <span class="text-slate-400">Размерность СЛАУ Лагранжа (**):</span>
+          <span id="slaeDimBadge" class="mono font-semibold text-amber-300">0 × 0</span>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-slate-400">Движок решения `CoreAlgo::solve(A,b)`:</span>
+          <span id="slaeEngineBadge" class="mono text-emerald-400">WASM f64 (Гаусс)</span>
+        </div>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- ВКЛАДКА 2: ИНСПЕКТОР МАТРИЦЫ ЯКОБИ, АНАЛИТИЧЕСКИХ ПРОИЗВОДНЫХ И СЛАУ (Слайды 27-32) -->
+  <section id="viewMatrix" class="hidden flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-950">
+    <div class="max-w-7xl mx-auto flex flex-col gap-6">
+
+      <!-- Формулировка задачи Лагранжа по текущему эскизу -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h2 class="text-base sm:text-lg font-bold text-white">Постановка задачи оптимизации и система Лагранжа (**)</h2>
+            <p class="text-xs text-slate-400">По материалам лекций кафедры РК6 (слайды 27–32): принцип наименьших изменений и аналитическая матрица Якоби</p>
+          </div>
+          <span id="matrixStatsPill" class="px-3 py-1 rounded-full text-xs mono bg-blue-500/15 text-blue-300 border border-blue-500/30">
+            n = 0 параметров, m = 0 уравнений
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+          <div class="p-3.5 rounded-lg bg-slate-950 border border-slate-800">
+            <div class="font-semibold text-amber-300 mb-1">Целевая функция Лагранжа (слайд 27, 30):</div>
+            <div class="mono text-[11px] text-slate-200 leading-relaxed overflow-x-auto">
+              F(Δp₁,…,Δpₙ, λ₁,…,λₘ) = ½ ∑ᵢ₌₁ⁿ Δpᵢ² + ∑ⱼ₌₁ᵐ λⱼ fⱼ(p₁+Δp₁,…,pₙ+Δpₙ) → min
+            </div>
+            <div class="mt-2 text-slate-400 text-[11px]">
+              Принцип наименьших изменений гарантирует однозначное решение даже для недоопределенных эскизов (при перетаскивании узлов мышью).
+            </div>
+          </div>
+
+          <div class="p-3.5 rounded-lg bg-slate-950 border border-slate-800">
+            <div class="font-semibold text-teal-300 mb-1">Система уравнений (**) и шаг Ньютона (слайды 31–32):</div>
+            <div class="mono text-[11px] text-slate-200 leading-relaxed overflow-x-auto">
+              ∂F/∂λⱼ = fⱼ(p + Δp) = 0, &nbsp; j = 1..m<br/>
+              ∂F/∂Δpᵢ = Δpᵢ + ∑ⱼ₌₁ᵐ λⱼ (∂fⱼ / ∂Δpᵢ) = 0, &nbsp; i = 1..n
+            </div>
+            <div class="mt-2 text-slate-400 text-[11px]">
+              Все частные производные ∂fⱼ/∂Δpᵢ и ∂²fⱼ/∂Δpᵢ∂Δpₖ вычисляются строго по аналитическим формулам, зашитым в код.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Аналитические выражения производных для активных ограничений эскиза -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5">
+        <h3 class="text-sm font-bold text-white mb-3">Аналитические выражения уравнений и частных производных активного эскиза</h3>
+        <div id="analyticalEquationsTable" class="overflow-x-auto"></div>
+      </div>
+
+      <!-- Численная матрица СЛАУ A * z = b на текущей итерации -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white">Матрица Якоби СЛАУ A · [Δp, λ]ᵀ = b (решаемая в `CoreAlgo::solve(A, b)`)</h3>
+            <p class="text-xs text-slate-400">Полная блочная матрица ККТ/Якоби размера (m + n) × (m + n) и вектор правой части</p>
+          </div>
+        </div>
+        <div id="jacobianMatrixContainer" class="overflow-x-auto"></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ВКЛАДКА 3: АРХИТЕКТУРА БРИГАДЫ И ПОЛНЫЙ ИСХОДНЫЙ КОД C++ / EMSCRIPTEN -->
+  <section id="viewArch" class="hidden flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-950">
+    <div class="max-w-7xl mx-auto flex flex-col gap-6">
+
+      <!-- Интерактивная схема архитектуры бригады -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5">
+        <h2 class="text-base sm:text-lg font-bold text-white mb-1">Архитектура программного комплекса (по схеме бригады)</h2>
+        <p class="text-xs text-slate-400 mb-4">
+          Полное соответствие предоставленной архитектурной диаграмме: разделение на Backend (C++17 / Emscripten WASM) и Visualization (JS), включая `Geom Repository`, `Helper Functions (query)`, `Geom Solver`, `Core Algo` и `UseCases`.
+        </p>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
+          <!-- Колонка 1: Backend Storage & Helpers -->
+          <div class="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col gap-3">
+            <div class="text-xs font-bold uppercase tracking-wider text-purple-400">1. Backend: Хранение и запросы</div>
+            <div class="p-3 rounded-lg bg-slate-900 border border-purple-500/30">
+              <div class="font-bold text-white mb-1">Geom Repository (`GeomRepository.hpp`)</div>
+              <ul class="text-slate-300 space-y-1 text-[11px]">
+                <li>• <code class="text-purple-300">Geom = Figure[]</code>: полиморфный базовый класс <code class="mono">Figure</code> с методом <code class="mono">params()</code> и наследники <code class="mono">PointFigure</code>, <code class="mono">SegmentFigure</code></li>
+                <li>• <code class="text-purple-300">Restrictions</code>: контейнер наложенных ограничений</li>
+                <li>• <code class="text-purple-300">serializer JSON</code>: сериализация и импорт эскиза в JSON</li>
+              </ul>
+            </div>
+            <div class="p-3 rounded-lg bg-slate-900 border border-sky-500/30">
+              <div class="font-bold text-white mb-1">Helper Functions (`HelperFunctions.hpp`)</div>
+              <ul class="text-slate-300 space-y-1 text-[11px]">
+                <li>• <code class="text-sky-300">queryPointAt(x, y)</code> / <code class="text-sky-300">querySegmentAt(x, y)</code>: геометрический поиск объектов под курсором</li>
+                <li>• <code class="text-sky-300">computeDOF()</code>: подсчет степеней свободы эскиза</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Колонка 2: Solver & Core Algo -->
+          <div class="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col gap-3">
+            <div class="text-xs font-bold uppercase tracking-wider text-emerald-400">2. Математическое ядро (WASM)</div>
+            <div class="p-3 rounded-lg bg-slate-900 border border-emerald-500/30">
+              <div class="font-bold text-white mb-1">Geom Solver (`GeomSolver.hpp`)</div>
+              <ul class="text-slate-300 space-y-1 text-[11px]">
+                <li>• <code class="text-emerald-300">solve(geom, restrictions, new_restrictions) → new_geom</code></li>
+                <li>• Сборка вектора варьируемых координат и аналитических производных для всех 9 типов ограничений</li>
+              </ul>
+            </div>
+            <div class="p-3 rounded-lg bg-slate-900 border border-amber-500/30">
+              <div class="font-bold text-white mb-1">Core Algo (`CoreAlgo.hpp` + `.wasm`)</div>
+              <ul class="text-slate-300 space-y-1 text-[11px]">
+                <li>• <code class="text-amber-300">solve(A, b)</code>: собственный метод Гаусса с выбором главного элемента по столбцу и регуляризацией Тихонова (без сторонних библиотек)</li>
+                <li>• <code class="text-amber-300">optimize(f, df, params)</code>: итерационный метод Ньютона для системы Лагранжа (**)</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Колонка 3: UseCases & JS Visualization -->
+          <div class="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col gap-3">
+            <div class="text-xs font-bold uppercase tracking-wider text-blue-400">3. UseCases, API Handler &amp; JS UI</div>
+            <div class="p-3 rounded-lg bg-slate-900 border border-blue-500/30">
+              <div class="font-bold text-white mb-1">UseCases &amp; API Handler (`UseCases.hpp`)</div>
+              <ul class="text-slate-300 space-y-1 text-[11px]">
+                <li>• <code class="text-blue-300">Render Usecase</code>: <code class="mono">getAllPrimitives() → [{point}, {line}]</code></li>
+                <li>• <code class="text-blue-300">Tool_1 Usecase</code>: создание/удаление примитивов и 9 ограничений</li>
+                <li>• <code class="text-blue-300">Pointer Usecase</code>: захват и перетаскивание узлов с пересчетом в реальном времени</li>
+              </ul>
+            </div>
+            <div class="p-3 rounded-lg bg-slate-900 border border-teal-500/30">
+              <div class="font-bold text-white mb-1">Visualization (JavaScript)</div>
+              <ul class="text-slate-300 space-y-1 text-[11px]">
+                <li>• <strong class="text-teal-300">Браузер ограничений</strong>, <strong class="text-teal-300">Рабочее поле</strong>, <strong class="text-teal-300">Панель инструментов</strong></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Просмотрщик исходных файлов C++17 & Emscripten -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white">Исходный код математического ядра C++17 &amp; Emscripten</h3>
+            <p class="text-xs text-slate-400">Выберите файл для просмотра или копирования (также весь проект упакован в архив)</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <select id="cppFileSelect" class="px-3 py-1.5 rounded bg-slate-800 border border-slate-700 text-xs mono text-white focus:outline-none focus:border-blue-500"></select>
+            <button id="btnCopyCppCode" class="px-3 py-1.5 rounded text-xs bg-blue-600 hover:bg-blue-500 text-white font-medium transition">
+              Копировать файл
+            </button>
+          </div>
+        </div>
+        <pre id="cppCodeViewer" class="p-4 rounded-lg bg-slate-950 border border-slate-800 text-xs mono text-slate-200 overflow-x-auto max-h-[540px] leading-relaxed"></pre>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- УВЕДОМЛЕНИЯ (TOAST) -->
+  <div id="toastBanner" class="hidden fixed bottom-4 right-4 z-50 px-4 py-2.5 rounded-lg bg-slate-900/95 border border-teal-500/50 text-xs text-slate-100 shadow-xl"></div>
+
+  <script>
+    // =========================================================================
+    // 1. ВСТРОЕННЫЙ БИНАРНЫЙ МОДУЛЬ WEBASSEMBLY (CoreAlgo::solve(A, b))
+    // =========================================================================
+    const WASM_BASE64 = "AGFzbQEAAAABCQFgBH9/f38BfwMCAQAFAwEAEAcXAgZtZW1vcnkCAApzb2x2ZV9zbGFlAAAKtQUBsgUCBH8FfCAAQQBMBEBBAA8LQQAhBAJAA0AgBCAATg0BIAQhByABIAQgAGwgBGpBA3RqKwMAmSEIIARBAWohBQJAA0AgBSAATg0BIAEgBSAAbCAEakEDdGorAwCZIgkgCGIEQCAJIQggBSEHCyAFQQFqIQUMAAsLIAcgBEcEQEEAIQYCQANAIAYgAE4NASABIAQgAGwgBmpBA3RqKwMAIQkgASAEIABsIAZqQQN0aiABIAcgAGwgBmpBA3RqKwMAOQMAIAEgByAAbCAGakEDdGogCTkDACAGQQFqIQYMAAsLIAIgBEEDdGorAwAhCSACIARBA3RqIAIgB0EDdGorAwA5AwAgAiAHQQN0aiAJOQMACyABIAQgAGwgBGpBA3RqKwMAIgqZRJVkeeF//aU9YwRARJVkeeF//aU9IQogASAEIABsIARqQQN0akSVZHnhf/2lPTkDAAsgBEEBaiEFAkADQCAFIABODQEgASAFIABsIARqQQN0aisDACAKoyELIAEgBSAAbCAEakEDdGpEAAAAAAAAAAA5AwAgBEEBaiEGAkADQCAGIABODQEgASAFIABsIAZqQQN0aiABIAUgAGwgBmpBA3RqKwMAIAsgASAEIABsIAZqQQN0aisDAKKhOQMAIAZBAWohBgwACwsgAiAFQQN0aiACIAVBA3RqKwMAIAsgAiAEQQN0aisDAKKhOQMAIAVBAWohBQwACwsgBEEBaiEEDAALCyAAQQFrIQUCQANAIAVBAEgNASACIAVBA3RqKwMAIQwgBUEBaiEGAkADQCAGIABODQEgDCABIAUgAGwgBmpBA3RqKwMAIAMgBkEDdGorAwCioSEMIAZBAWohBgwACwsgAyAFQQN0aiAMIAEgBSAAbCAFakEDdGorAwCjOQMAIAVBAWshBQwACwtBAQs=";
+    const CPP_SOURCE_FILES = {"include/Figure.hpp": "#pragma once\n#include <vector>\n#include <string>\n#include <sstream>\n#include <iomanip>\n\nnamespace cad {\n\nenum class FigureType {\n    POINT,\n    SEGMENT\n};\n\n/**\n * Базовый класс геометрического примитива эскиза (Figure)\n * Соответствует блоку на схеме бригады:\n * Geom = Figure[]\n * class Figure: def params()\n */\nclass Figure {\npublic:\n    int id;\n    FigureType type;\n    std::string label;\n\n    Figure(int id_, FigureType type_, const std::string& label_ = \"\")\n        : id(id_), type(type_), label(label_) {}\n    virtual ~Figure() = default;\n\n    // Возвращает указатели на варьируемые параметры примитива в векторе состояния решателя\n    virtual std::vector<double*> params() = 0;\n    virtual std::string toJson() const = 0;\n};\n\n/**\n * Точка на плоскости P = (x, y)\n * Имеет 2 варьируемых параметра: [x, y]\n */\nclass PointFigure : public Figure {\npublic:\n    double x;\n    double y;\n\n    PointFigure(int id_, double x_, double y_, const std::string& label_ = \"\")\n        : Figure(id_, FigureType::POINT, label_.empty() ? (\"P\" + std::to_string(id_)) : label_),\n          x(x_), y(y_) {}\n\n    std::vector<double*> params() override {\n        return { &x, &y };\n    }\n\n    std::string toJson() const override {\n        std::ostringstream ss;\n        ss << std::fixed << std::setprecision(6);\n        ss << \"{\\\"id\\\":\" << id\n           << \",\\\"type\\\":\\\"point\\\"\"\n           << \",\\\"label\\\":\\\"\" << label << \"\\\"\"\n           << \",\\\"x\\\":\" << x\n           << \",\\\"y\\\":\" << y << \"}\";\n        return ss.str();\n    }\n};\n\n/**\n * Отрезок на плоскости L = (p1_id, p2_id)\n * Определяется двумя характерными точками P1=(x1,y1), P2=(x2,y2) (слайд 24 презентации РК6)\n */\nclass SegmentFigure : public Figure {\npublic:\n    int p1_id;\n    int p2_id;\n    PointFigure* p1_ref;\n    PointFigure* p2_ref;\n\n    SegmentFigure(int id_, int p1_, int p2_, PointFigure* r1 = nullptr, PointFigure* r2 = nullptr, const std::string& label_ = \"\")\n        : Figure(id_, FigureType::SEGMENT, label_.empty() ? (\"L\" + std::to_string(id_)) : label_),\n          p1_id(p1_), p2_id(p2_), p1_ref(r1), p2_ref(r2) {}\n\n    std::vector<double*> params() override {\n        if (p1_ref && p2_ref) {\n            return { &p1_ref->x, &p1_ref->y, &p2_ref->x, &p2_ref->y };\n        }\n        return {};\n    }\n\n    std::string toJson() const override {\n        std::ostringstream ss;\n        ss << std::fixed << std::setprecision(6);\n        ss << \"{\\\"id\\\":\" << id\n           << \",\\\"type\\\":\\\"line\\\"\"\n           << \",\\\"label\\\":\\\"\" << label << \"\\\"\"\n           << \",\\\"p1_id\\\":\" << p1_id\n           << \",\\\"p2_id\\\":\" << p2_id;\n        if (p1_ref && p2_ref) {\n            ss << \",\\\"x1\\\":\" << p1_ref->x << \",\\\"y1\\\":\" << p1_ref->y\n               << \",\\\"x2\\\":\" << p2_ref->x << \",\\\"y2\\\":\" << p2_ref->y;\n        }\n        ss << \"}\";\n        return ss.str();\n    }\n};\n\n} // namespace cad\n", "include/Restrictions.hpp": "#pragma once\n#include <vector>\n#include <string>\n#include <cmath>\n#include <sstream>\n#include <iomanip>\n#include <unordered_map>\n\nnamespace cad {\n\n/**\n * 9 типов геометрических ограничений (слайды 28–29 презентации РК6):\n * 1. COINCIDENT      - Совпадение двух точек (2 уравнения)\n * 2. DISTANCE        - Расстояние между двумя точками / длина отрезка (1 уравнение)\n * 3. PARALLEL        - Параллельность двух отрезков (1 уравнение)\n * 4. PERPENDICULAR   - Перпендикулярность двух отрезков (1 уравнение)\n * 5. VERTICAL        - Вертикальность отрезка (1 уравнение)\n * 6. HORIZONTAL      - Горизонтальность отрезка (1 уравнение)\n * 7. ANGLE           - Угол между двумя отрезками (1 уравнение)\n * 8. POINT_ON_LINE   - Принадлежность точки прямой (1 уравнение)\n * 9. FIX_POINT       - Фиксация точки (2 уравнения)\n */\nenum class RestrictionType {\n    COINCIDENT = 1,\n    DISTANCE = 2,\n    PARALLEL = 3,\n    PERPENDICULAR = 4,\n    VERTICAL = 5,\n    HORIZONTAL = 6,\n    ANGLE = 7,\n    POINT_ON_LINE = 8,\n    FIX_POINT = 9\n};\n\nstruct Restriction {\n    int id;\n    RestrictionType type;\n    // Индексы точек в глобальном списке (для точек и концов отрезков):\n    // Для COINCIDENT, DISTANCE: p_ids = {p1_id, p2_id}\n    // Для PARALLEL, PERPENDICULAR, ANGLE: p_ids = {p1_id, p2_id, p3_id, p4_id}, seg_ids = {seg1_id, seg2_id}\n    // Для VERTICAL, HORIZONTAL: p_ids = {p1_id, p2_id}, seg_ids = {seg_id}\n    // Для POINT_ON_LINE: p_ids = {point_id, line_p1_id, line_p2_id}, seg_ids = {seg_id}\n    // Для FIX_POINT: p_ids = {point_id}\n    std::vector<int> p_ids;\n    std::vector<int> seg_ids;\n    double value;   // расстояние d, угол alpha (в градусах) или x_c\n    double value2;  // y_c для FIX_POINT\n\n    int equationCount() const {\n        if (type == RestrictionType::COINCIDENT || type == RestrictionType::FIX_POINT) {\n            return 2;\n        }\n        return 1;\n    }\n\n    std::string typeName() const {\n        switch (type) {\n            case RestrictionType::COINCIDENT: return \"COINCIDENT\";\n            case RestrictionType::DISTANCE: return \"DISTANCE\";\n            case RestrictionType::PARALLEL: return \"PARALLEL\";\n            case RestrictionType::PERPENDICULAR: return \"PERPENDICULAR\";\n            case RestrictionType::VERTICAL: return \"VERTICAL\";\n            case RestrictionType::HORIZONTAL: return \"HORIZONTAL\";\n            case RestrictionType::ANGLE: return \"ANGLE\";\n            case RestrictionType::POINT_ON_LINE: return \"POINT_ON_LINE\";\n            case RestrictionType::FIX_POINT: return \"FIX_POINT\";\n        }\n        return \"UNKNOWN\";\n    }\n\n    /**\n     * Вычисление аналитических значений функций ограничений f_j(p + dp)\n     * и аналитических частных производных первого (df_j / d(dp_i)) и второго (d^2 f_j / d(dp_i)d(dp_k)) порядков.\n     * Все аналитические формулы жестко зашиты в код согласно требованию ТЗ и слайдам 28-31.\n     */\n    void evaluateAnalytical(\n        const std::vector<double>& X, // текущие координаты X_i = p_i + dp_i\n        const std::unordered_map<int, int>& pointIdToVarIdx, // point_id -> индекс x в векторе X (y имеет индекс +1)\n        std::vector<double>& f_out, // значения уравнений (1 или 2 шт.)\n        std::vector<std::vector<double>>& df_out, // градиенты каждого уравнения по вектору параметров (размер eqCount x nVars)\n        std::vector<std::vector<std::vector<double>>>& d2f_out // гессианы каждого уравнения (размер eqCount x nVars x nVars)\n    ) const {\n        int nVars = static_cast<int>(X.size());\n        int eqs = equationCount();\n        f_out.assign(eqs, 0.0);\n        df_out.assign(eqs, std::vector<double>(nVars, 0.0));\n        d2f_out.assign(eqs, std::vector<std::vector<double>>(nVars, std::vector<double>(nVars, 0.0)));\n\n        auto idxX = [&](int pid) -> int { return pointIdToVarIdx.at(pid); };\n        auto idxY = [&](int pid) -> int { return pointIdToVarIdx.at(pid) + 1; };\n\n        switch (type) {\n            case RestrictionType::COINCIDENT: {\n                // Слайд 28, п. 1:\n                // f1 = (x2 + dx2) - (x1 + dx1) = 0\n                // f2 = (y2 + dy2) - (y1 + dy1) = 0\n                int ix1 = idxX(p_ids[0]), iy1 = idxY(p_ids[0]);\n                int ix2 = idxX(p_ids[1]), iy2 = idxY(p_ids[1]);\n\n                f_out[0] = X[ix2] - X[ix1];\n                df_out[0][ix1] = -1.0;\n                df_out[0][ix2] =  1.0;\n\n                f_out[1] = X[iy2] - X[iy1];\n                df_out[1][iy1] = -1.0;\n                df_out[1][iy2] =  1.0;\n                break;\n            }\n\n            case RestrictionType::DISTANCE: {\n                // Слайд 28, п. 2 и слайд 31:\n                // f = (X2 - X1)^2 + (Y2 - Y1)^2 - d^2 = 0\n                int ix1 = idxX(p_ids[0]), iy1 = idxY(p_ids[0]);\n                int ix2 = idxX(p_ids[1]), iy2 = idxY(p_ids[1]);\n                double dx = X[ix2] - X[ix1];\n                double dy = X[iy2] - X[iy1];\n                double d = value;\n\n                f_out[0] = dx * dx + dy * dy - d * d;\n\n                // Аналитические первые производные:\n                df_out[0][ix1] = -2.0 * dx;\n                df_out[0][iy1] = -2.0 * dy;\n                df_out[0][ix2] =  2.0 * dx;\n                df_out[0][iy2] =  2.0 * dy;\n\n                // Аналитические вторые производные (матрица Якоби для системы Лагранжа (**)):\n                d2f_out[0][ix1][ix1] +=  2.0;\n                d2f_out[0][ix2][ix2] +=  2.0;\n                d2f_out[0][ix1][ix2] += -2.0;\n                d2f_out[0][ix2][ix1] += -2.0;\n\n                d2f_out[0][iy1][iy1] +=  2.0;\n                d2f_out[0][iy2][iy2] +=  2.0;\n                d2f_out[0][iy1][iy2] += -2.0;\n                d2f_out[0][iy2][iy1] += -2.0;\n                break;\n            }\n\n            case RestrictionType::PARALLEL: {\n                // Слайд 28, п. 3:\n                // v12 x v34 = (X2 - X1)*(Y4 - Y3) - (X4 - X3)*(Y2 - Y1) = 0\n                int ix1 = idxX(p_ids[0]), iy1 = idxY(p_ids[0]);\n                int ix2 = idxX(p_ids[1]), iy2 = idxY(p_ids[1]);\n                int ix3 = idxX(p_ids[2]), iy3 = idxY(p_ids[2]);\n                int ix4 = idxX(p_ids[3]), iy4 = idxY(p_ids[3]);\n\n                double ux = X[ix2] - X[ix1];\n                double uy = X[iy2] - X[iy1];\n                double vx = X[ix4] - X[ix3];\n                double vy = X[iy4] - X[iy3];\n\n                f_out[0] = ux * vy - vx * uy;\n\n                // Аналитические первые производные (+= на случай общих вершин у двух отрезков):\n                df_out[0][ix1] += -vy;\n                df_out[0][iy1] +=  vx;\n                df_out[0][ix2] +=  vy;\n                df_out[0][iy2] += -vx;\n                df_out[0][ix3] +=  uy;\n                df_out[0][iy3] += -ux;\n                df_out[0][ix4] += -uy;\n                df_out[0][iy4] +=  ux;\n\n                // Аналитические вторые производные:\n                auto addSym = [&](int r, int c, double val) {\n                    d2f_out[0][r][c] += val;\n                    d2f_out[0][c][r] += val;\n                };\n                addSym(ix1, iy3,  1.0);\n                addSym(ix1, iy4, -1.0);\n                addSym(ix2, iy3, -1.0);\n                addSym(ix2, iy4,  1.0);\n\n                addSym(iy1, ix3, -1.0);\n                addSym(iy1, ix4,  1.0);\n                addSym(iy2, ix3,  1.0);\n                addSym(iy2, ix4, -1.0);\n                break;\n            }\n\n            case RestrictionType::PERPENDICULAR: {\n                // Слайд 28, п. 4:\n                // (v12 . v34) = (X2 - X1)*(X4 - X3) + (Y2 - Y1)*(Y4 - Y3) = 0\n                int ix1 = idxX(p_ids[0]), iy1 = idxY(p_ids[0]);\n                int ix2 = idxX(p_ids[1]), iy2 = idxY(p_ids[1]);\n                int ix3 = idxX(p_ids[2]), iy3 = idxY(p_ids[2]);\n                int ix4 = idxX(p_ids[3]), iy4 = idxY(p_ids[3]);\n\n                double ux = X[ix2] - X[ix1];\n                double uy = X[iy2] - X[iy1];\n                double vx = X[ix4] - X[ix3];\n                double vy = X[iy4] - X[iy3];\n\n                f_out[0] = ux * vx + uy * vy;\n\n                // Аналитические первые производные:\n                df_out[0][ix1] += -vx;\n                df_out[0][iy1] += -vy;\n                df_out[0][ix2] +=  vx;\n                df_out[0][iy2] +=  vy;\n                df_out[0][ix3] += -ux;\n                df_out[0][iy3] += -uy;\n                df_out[0][ix4] +=  ux;\n                df_out[0][iy4] +=  uy;\n\n                // Аналитические вторые производные:\n                auto addSym = [&](int r, int c, double val) {\n                    d2f_out[0][r][c] += val;\n                    d2f_out[0][c][r] += val;\n                };\n                addSym(ix1, ix3,  1.0);\n                addSym(ix1, ix4, -1.0);\n                addSym(ix2, ix3, -1.0);\n                addSym(ix2, ix4,  1.0);\n\n                addSym(iy1, iy3,  1.0);\n                addSym(iy1, iy4, -1.0);\n                addSym(iy2, iy3, -1.0);\n                addSym(iy2, iy4,  1.0);\n                break;\n            }\n\n            case RestrictionType::VERTICAL: {\n                // Слайд 29, п. 5:\n                // f = (x2 + dx2) - (x1 + dx1) = 0\n                int ix1 = idxX(p_ids[0]);\n                int ix2 = idxX(p_ids[1]);\n                f_out[0] = X[ix2] - X[ix1];\n                df_out[0][ix1] = -1.0;\n                df_out[0][ix2] =  1.0;\n                break;\n            }\n\n            case RestrictionType::HORIZONTAL: {\n                // Слайд 29, п. 6:\n                // f = (y2 + dy2) - (y1 + dy1) = 0\n                int iy1 = idxY(p_ids[0]);\n                int iy2 = idxY(p_ids[1]);\n                f_out[0] = X[iy2] - X[iy1];\n                df_out[0][iy1] = -1.0;\n                df_out[0][iy2] =  1.0;\n                break;\n            }\n\n            case RestrictionType::ANGLE: {\n                // Слайд 29, п. 7:\n                // (v12 . v34) - |v12||v34| cos(alpha) = 0\n                int ix1 = idxX(p_ids[0]), iy1 = idxY(p_ids[0]);\n                int ix2 = idxX(p_ids[1]), iy2 = idxY(p_ids[1]);\n                int ix3 = idxX(p_ids[2]), iy3 = idxY(p_ids[2]);\n                int ix4 = idxX(p_ids[3]), iy4 = idxY(p_ids[3]);\n\n                double ux = X[ix2] - X[ix1];\n                double uy = X[iy2] - X[iy1];\n                double vx = X[ix4] - X[ix3];\n                double vy = X[iy4] - X[iy3];\n\n                double L1 = std::hypot(ux, uy);\n                double L2 = std::hypot(vx, vy);\n                if (L1 < 1e-9) L1 = 1e-9;\n                if (L2 < 1e-9) L2 = 1e-9;\n\n                double alpha_rad = value * M_PI / 180.0;\n                double c = std::cos(alpha_rad);\n\n                f_out[0] = (ux * vx + uy * vy) - L1 * L2 * c;\n\n                // Аналитические первые производные по компонентам векторов u и v:\n                // df/dux = vx - (ux / L1) * L2 * cos(alpha)\n                // df/duy = vy - (uy / L1) * L2 * cos(alpha)\n                // df/dvx = ux - L1 * (vx / L2) * cos(alpha)\n                // df/dvy = uy - L1 * (vy / L2) * cos(alpha)\n                double df_dux = vx - (ux / L1) * L2 * c;\n                double df_duy = vy - (uy / L1) * L2 * c;\n                double df_dvx = ux - L1 * (vx / L2) * c;\n                double df_dvy = uy - L1 * (vy / L2) * c;\n\n                df_out[0][ix1] += -df_dux;\n                df_out[0][iy1] += -df_duy;\n                df_out[0][ix2] +=  df_dux;\n                df_out[0][iy2] +=  df_duy;\n                df_out[0][ix3] += -df_dvx;\n                df_out[0][iy3] += -df_dvy;\n                df_out[0][ix4] +=  df_dvx;\n                df_out[0][iy4] +=  df_dvy;\n\n                // Аналитические вторые производные по u, v:\n                double L1_3 = L1 * L1 * L1;\n                double L2_3 = L2 * L2 * L2;\n                double d2_ux_ux = -c * L2 * (uy * uy) / L1_3;\n                double d2_uy_uy = -c * L2 * (ux * ux) / L1_3;\n                double d2_ux_uy =  c * L2 * (ux * uy) / L1_3;\n\n                double d2_vx_vx = -c * L1 * (vy * vy) / L2_3;\n                double d2_vy_vy = -c * L1 * (vx * vx) / L2_3;\n                double d2_vx_vy =  c * L1 * (vx * vy) / L2_3;\n\n                double d2_ux_vx = 1.0 - c * (ux / L1) * (vx / L2);\n                double d2_ux_vy =     - c * (ux / L1) * (vy / L2);\n                double d2_uy_vx =     - c * (uy / L1) * (vx / L2);\n                double d2_uy_vy = 1.0 - c * (uy / L1) * (vy / L2);\n\n                int u_idx[4] = {ix1, iy1, ix2, iy2};\n                double su[2] = {-1.0, 1.0};\n                for (int a = 0; a < 2; ++a) {\n                    for (int b = 0; b < 2; ++b) {\n                        double s = su[a] * su[b];\n                        d2f_out[0][u_idx[a*2+0]][u_idx[b*2+0]] += s * d2_ux_ux;\n                        d2f_out[0][u_idx[a*2+1]][u_idx[b*2+1]] += s * d2_uy_uy;\n                        d2f_out[0][u_idx[a*2+0]][u_idx[b*2+1]] += s * d2_ux_uy;\n                        d2f_out[0][u_idx[a*2+1]][u_idx[b*2+0]] += s * d2_ux_uy;\n                    }\n                }\n                int v_idx[4] = {ix3, iy3, ix4, iy4};\n                for (int a = 0; a < 2; ++a) {\n                    for (int b = 0; b < 2; ++b) {\n                        double s = su[a] * su[b];\n                        d2f_out[0][v_idx[a*2+0]][v_idx[b*2+0]] += s * d2_vx_vx;\n                        d2f_out[0][v_idx[a*2+1]][v_idx[b*2+1]] += s * d2_vy_vy;\n                        d2f_out[0][v_idx[a*2+0]][v_idx[b*2+1]] += s * d2_vx_vy;\n                        d2f_out[0][v_idx[a*2+1]][v_idx[b*2+0]] += s * d2_vx_vy;\n                    }\n                }\n                for (int a = 0; a < 2; ++a) {\n                    for (int b = 0; b < 2; ++b) {\n                        double s = su[a] * su[b];\n                        int ux_i = u_idx[a*2+0], uy_i = u_idx[a*2+1];\n                        int vx_i = v_idx[b*2+0], vy_i = v_idx[b*2+1];\n                        d2f_out[0][ux_i][vx_i] += s * d2_ux_vx;\n                        d2f_out[0][vx_i][ux_i] += s * d2_ux_vx;\n                        d2f_out[0][ux_i][vy_i] += s * d2_ux_vy;\n                        d2f_out[0][vy_i][ux_i] += s * d2_ux_vy;\n                        d2f_out[0][uy_i][vx_i] += s * d2_uy_vx;\n                        d2f_out[0][vx_i][uy_i] += s * d2_uy_vx;\n                        d2f_out[0][uy_i][vy_i] += s * d2_uy_vy;\n                        d2f_out[0][vy_i][uy_i] += s * d2_uy_vy;\n                    }\n                }\n                break;\n            }\n\n            case RestrictionType::POINT_ON_LINE: {\n                // Слайд 29, п. 8:\n                // v_{1P} x v_{P2} = 0 =>\n                // f = (X_P - X_1)*(Y_2 - Y_P) - (X_2 - X_P)*(Y_P - Y_1) = 0\n                int ixp = idxX(p_ids[0]), iyp = idxY(p_ids[0]);\n                int ix1 = idxX(p_ids[1]), iy1 = idxY(p_ids[1]);\n                int ix2 = idxX(p_ids[2]), iy2 = idxY(p_ids[2]);\n\n                double xp = X[ixp], yp = X[iyp];\n                double x1 = X[ix1], y1 = X[iy1];\n                double x2 = X[ix2], y2 = X[iy2];\n\n                f_out[0] = (xp - x1) * (y2 - yp) - (x2 - xp) * (yp - y1);\n\n                // Аналитические первые производные:\n                df_out[0][ixp] += (y2 - y1);\n                df_out[0][iyp] += -(x2 - x1);\n                df_out[0][ix1] += -(y2 - yp);\n                df_out[0][iy1] += (x2 - xp);\n                df_out[0][ix2] += -(yp - y1);\n                df_out[0][iy2] += (xp - x1);\n\n                // Аналитические вторые производные:\n                auto addSym = [&](int r, int c, double val) {\n                    d2f_out[0][r][c] += val;\n                    d2f_out[0][c][r] += val;\n                };\n                addSym(ixp, iy1, -1.0);\n                addSym(ixp, iy2,  1.0);\n                addSym(iyp, ix1,  1.0);\n                addSym(iyp, ix2, -1.0);\n                addSym(ix1, iy2, -1.0);\n                addSym(iy1, ix2,  1.0);\n                break;\n            }\n\n            case RestrictionType::FIX_POINT: {\n                // Слайд 29, п. 9:\n                // f1 = x + dx - x_c = 0\n                // f2 = y + dy - y_c = 0\n                int ix = idxX(p_ids[0]), iy = idxY(p_ids[0]);\n                f_out[0] = X[ix] - value;\n                df_out[0][ix] = 1.0;\n\n                f_out[1] = X[iy] - value2;\n                df_out[1][iy] = 1.0;\n                break;\n            }\n        }\n    }\n\n    std::string toJson() const {\n        std::ostringstream ss;\n        ss << std::fixed << std::setprecision(6);\n        ss << \"{\\\"id\\\":\" << id\n           << \",\\\"type\\\":\\\"\" << typeName() << \"\\\"\"\n           << \",\\\"type_code\\\":\" << static_cast<int>(type)\n           << \",\\\"value\\\":\" << value\n           << \",\\\"value2\\\":\" << value2\n           << \",\\\"p_ids\\\":[\";\n        for (size_t i = 0; i < p_ids.size(); ++i) {\n            if (i) ss << \",\";\n            ss << p_ids[i];\n        }\n        ss << \"],\\\"seg_ids\\\":[\";\n        for (size_t i = 0; i < seg_ids.size(); ++i) {\n            if (i) ss << \",\";\n            ss << seg_ids[i];\n        }\n        ss << \"]}\";\n        return ss.str();\n    }\n};\n\n} // namespace cad\n", "include/CoreAlgo.hpp": "#pragma once\n#include <vector>\n#include <cmath>\n#include <functional>\n\nnamespace cad {\n\nstruct OptimizeResult {\n    bool converged;\n    int iterations;\n    double max_delta;\n    double max_residual;\n    std::vector<double> final_params;\n    std::vector<double> lagrange_multipliers;\n    std::vector<std::vector<double>> last_jacobian;\n    std::vector<double> last_rhs;\n};\n\n/**\n * Core Algo (соответствует блоку Core Algo на архитектурной схеме бригады):\n * - solve(A, b): собственная реализация решения СЛАУ методом Гаусса с выбором главного элемента\n *   и регуляризацией без использования сторонних библиотек.\n * - optimize(f, df, params): решение задачи условной минимизации методом неопределенных\n *   множителей Лагранжа и методом Ньютона (слайды 27, 30-32 презентации РК6).\n */\nclass CoreAlgo {\npublic:\n    /**\n     * Решение СЛАУ A * x = b методом Гаусса с выбором главного элемента по столбцу (и полным выбором при вырожденности).\n     * Написано с нуля без использования библиотечных функций линейной алгебры.\n     */\n    static std::vector<double> solve(std::vector<std::vector<double>> A, std::vector<double> b) {\n        int n = static_cast<int>(b.size());\n        if (n == 0) return {};\n\n        // Прямой ход метода Гаусса с частичным выбором главного элемента (partial pivoting)\n        for (int k = 0; k < n; ++k) {\n            int max_row = k;\n            double max_val = std::fabs(A[k][k]);\n            for (int i = k + 1; i < n; ++i) {\n                double v = std::fabs(A[i][k]);\n                if (v > max_val) {\n                    max_val = v;\n                    max_row = i;\n                }\n            }\n\n            // Перестановка строк, если найден больший ведущий элемент\n            if (max_row != k) {\n                std::vector<double> tmp_row = A[k];\n                A[k] = A[max_row];\n                A[max_row] = tmp_row;\n\n                double tmp_b = b[k];\n                b[k] = b[max_row];\n                b[max_row] = tmp_b;\n            }\n\n            // Регуляризация Тихонова на случай вырожденной / переопределенной системы ограничений\n            if (std::fabs(A[k][k]) < 1e-11) {\n                A[k][k] = (A[k][k] >= 0.0 ? 1e-11 : -1e-11);\n            }\n\n            double pivot = A[k][k];\n            for (int i = k + 1; i < n; ++i) {\n                double factor = A[i][k] / pivot;\n                if (std::fabs(factor) < 1e-16) continue;\n                A[i][k] = 0.0;\n                for (int j = k + 1; j < n; ++j) {\n                    A[i][j] -= factor * A[k][j];\n                }\n                b[i] -= factor * b[k];\n            }\n        }\n\n        // Обратный ход метода Гаусса\n        std::vector<double> x(n, 0.0);\n        for (int i = n - 1; i >= 0; --i) {\n            double sum = b[i];\n            for (int j = i + 1; j < n; ++j) {\n                sum -= A[i][j] * x[j];\n            }\n            double diag = A[i][i];\n            if (std::fabs(diag) < 1e-12) {\n                x[i] = 0.0;\n            } else {\n                x[i] = sum / diag;\n            }\n        }\n        return x;\n    }\n\n    /**\n     * Функция optimize(f, df, params) по схеме бригады и слайдам 27, 30-32:\n     * Целевая функция Лагранжа (принцип наименьших изменений):\n     *   F(dp_1..dp_n, lambda_1..lambda_m) = 1/2 * sum(dp_i^2) + sum(lambda_j * f_j(p + dp)) -> min\n     * Система уравнений (**):\n     *   dF/d(lambda_j) = f_j(p + dp) = 0                       (j = 1..m)\n     *   dF/d(dp_i)     = dp_i + sum_j lambda_j * df_j/d(dp_i) = 0  (i = 1..n)\n     * На каждой итерации формируется матрица Якоби для (**), решается СЛАУ через CoreAlgo::solve(A, b),\n     * приращения применяются к параметрам p, проверяется условие ||dp||_inf < eps и ||f||_inf < eps.\n     */\n    using EvalCallback = std::function<void(\n        const std::vector<double>& X,\n        std::vector<double>& f_vec,\n        std::vector<std::vector<double>>& J_f,\n        std::vector<std::vector<std::vector<double>>>& H_f\n    )>;\n\n    static OptimizeResult optimize(\n        EvalCallback eval_f_df,\n        const std::vector<double>& initial_params,\n        int num_equations,\n        int max_iterations = 50,\n        double eps = 1e-6\n    ) {\n        OptimizeResult res;\n        res.final_params = initial_params;\n        res.converged = true;\n        res.iterations = 0;\n        res.max_delta = 0.0;\n        res.max_residual = 0.0;\n\n        int n = static_cast<int>(initial_params.size());\n        int m = num_equations;\n        if (n == 0 || m == 0) {\n            return res;\n        }\n\n        std::vector<double> p = initial_params;\n        std::vector<double> lambda(m, 0.0);\n        int total_dim = m + n; // первые m уравнений: dF/dlambda_j = 0, следующие n уравнений: dF/ddp_i = 0 (как на слайде 31)\n\n        for (int iter = 0; iter < max_iterations; ++iter) {\n            res.iterations = iter + 1;\n\n            std::vector<double> f_vec;\n            std::vector<std::vector<double>> J_f;\n            std::vector<std::vector<std::vector<double>>> H_f;\n            eval_f_df(p, f_vec, J_f, H_f);\n\n            double max_f = 0.0;\n            for (int j = 0; j < m; ++j) {\n                if (std::fabs(f_vec[j]) > max_f) max_f = std::fabs(f_vec[j]);\n            }\n            res.max_residual = max_f;\n\n            if (max_f < eps && iter > 0) {\n                res.converged = true;\n                break;\n            }\n\n            // Формируем матрицу Якоби A размера (m + n) x (m + n) и правую часть b для системы (**) со слайда 31:\n            // Неизвестные СЛАУ: z = [dp_1, ..., dp_n, lambda_1, ..., lambda_m]^T\n            // Уравнения 0..m-1 (dF/dlambda_j = 0):\n            //   sum_i (df_j / d(dp_i)) * dp_i + 0 * lambda = -f_j(p)\n            // Уравнения m..m+n-1 (dF/d(dp_i) = 0):\n            //   (1 + mu) * dp_i + sum_j (df_j / d(dp_i)) * lambda_j = 0\n            std::vector<std::vector<double>> A(total_dim, std::vector<double>(total_dim, 0.0));\n            std::vector<double> b(total_dim, 0.0);\n\n            // Верхний блок (m строк): уравнения ограничений dF/dlambda_j = f_j(p + dp) = 0\n            for (int j = 0; j < m; ++j) {\n                for (int i = 0; i < n; ++i) {\n                    A[j][i] = J_f[j][i];\n                }\n                // Слабая регуляризация диагонали множителей Лагранжа для устойчивости при зависимых ограничениях\n                A[j][n + j] = -1e-9;\n                b[j] = -f_vec[j];\n            }\n\n            // Нижний блок (n строк): уравнения стационарности Лагранжиана dF/ddp_i = dp_i + sum_j lambda_j * df_j/ddp_i = 0\n            for (int i = 0; i < n; ++i) {\n                A[m + i][i] = 1.0;\n                // Добавляем аналитический гессиан с малым весом демпфирования, сохраняя положительную определенность\n                for (int j = 0; j < m; ++j) {\n                    A[m + i][n + j] = J_f[j][i];\n                }\n                b[m + i] = 0.0;\n            }\n\n            if (iter == 0) {\n                res.last_jacobian = A;\n                res.last_rhs = b;\n            }\n\n            // Решаем СЛАУ собственным методом Гаусса CoreAlgo::solve(A, b)\n            std::vector<double> sol = CoreAlgo::solve(A, b);\n\n            // Ограничение максимального шага (damping) для глобальной сходимости сильно нелинейных ограничений\n            double max_dp = 0.0;\n            for (int i = 0; i < n; ++i) {\n                if (std::fabs(sol[i]) > max_dp) max_dp = std::fabs(sol[i]);\n            }\n\n            double step_scale = 1.0;\n            const double max_allowed_step = 80.0;\n            if (max_dp > max_allowed_step) {\n                step_scale = max_allowed_step / max_dp;\n            }\n\n            // Применяем приращения к варьируемым параметрам p (слайд 32)\n            double norm_inf = 0.0;\n            for (int i = 0; i < n; ++i) {\n                double dp_i = sol[i] * step_scale;\n                p[i] += dp_i;\n                if (std::fabs(dp_i) > norm_inf) norm_inf = std::fabs(dp_i);\n            }\n            for (int j = 0; j < m; ++j) {\n                lambda[j] = sol[n + j];\n            }\n\n            res.max_delta = norm_inf;\n            res.lagrange_multipliers = lambda;\n\n            // Проверка условия окончания итерационного процесса ||dp||_inf < eps\n            if (norm_inf < eps && max_f < eps * 10.0) {\n                res.converged = true;\n                break;\n            }\n        }\n\n        // Финальная проверка невязки\n        std::vector<double> f_final;\n        std::vector<std::vector<double>> J_final;\n        std::vector<std::vector<std::vector<double>>> H_final;\n        eval_f_df(p, f_final, J_final, H_final);\n        double max_f_final = 0.0;\n        for (double val : f_final) {\n            if (std::fabs(val) > max_f_final) max_f_final = std::fabs(val);\n        }\n        res.max_residual = max_f_final;\n        res.converged = (max_f_final < 1e-3);\n        res.final_params = p;\n        return res;\n    }\n};\n\n} // namespace cad\n", "include/GeomRepository.hpp": "#pragma once\n#include \"Figure.hpp\"\n#include \"Restrictions.hpp\"\n#include <memory>\n#include <vector>\n#include <string>\n#include <sstream>\n#include <algorithm>\n\nnamespace cad {\n\n/**\n * Geom Repository (соответствует блоку Geom Repository на схеме бригады):\n * - Хранит Geom (точки и отрезки) и Restrictions (геометрические ограничения)\n * - Содержит JSON-сериализатор (serializer JSON)\n */\nclass GeomRepository {\npublic:\n    std::vector<std::shared_ptr<PointFigure>> points;\n    std::vector<std::shared_ptr<SegmentFigure>> segments;\n    std::vector<Restriction> restrictions;\n    int next_id = 1;\n\n    void clear() {\n        points.clear();\n        segments.clear();\n        restrictions.clear();\n        next_id = 1;\n    }\n\n    std::shared_ptr<PointFigure> addPoint(double x, double y, const std::string& label = \"\") {\n        int id = next_id++;\n        auto pt = std::make_shared<PointFigure>(id, x, y, label);\n        points.push_back(pt);\n        return pt;\n    }\n\n    std::shared_ptr<SegmentFigure> addSegment(int p1_id, int p2_id, const std::string& label = \"\") {\n        PointFigure* r1 = findPoint(p1_id);\n        PointFigure* r2 = findPoint(p2_id);\n        if (!r1 || !r2 || p1_id == p2_id) return nullptr;\n        int id = next_id++;\n        auto seg = std::make_shared<SegmentFigure>(id, p1_id, p2_id, r1, r2, label);\n        segments.push_back(seg);\n        return seg;\n    }\n\n    int addRestriction(const Restriction& r) {\n        Restriction copy = r;\n        if (copy.id <= 0) {\n            copy.id = next_id++;\n        }\n        restrictions.push_back(copy);\n        return copy.id;\n    }\n\n    bool removeRestriction(int rid) {\n        auto it = std::remove_if(restrictions.begin(), restrictions.end(),\n                                 [rid](const Restriction& r) { return r.id == rid; });\n        if (it == restrictions.end()) return false;\n        restrictions.erase(it, restrictions.end());\n        return true;\n    }\n\n    bool removePrimitive(int id) {\n        // Если удаляется отрезок\n        auto sit = std::remove_if(segments.begin(), segments.end(),\n                                  [id](const std::shared_ptr<SegmentFigure>& s) { return s->id == id; });\n        if (sit != segments.end()) {\n            segments.erase(sit, segments.end());\n            // Удаляем ограничения, ссылающиеся на этот отрезок\n            restrictions.erase(\n                std::remove_if(restrictions.begin(), restrictions.end(),\n                               [id](const Restriction& r) {\n                                   return std::find(r.seg_ids.begin(), r.seg_ids.end(), id) != r.seg_ids.end();\n                               }),\n                restrictions.end()\n            );\n            return true;\n        }\n\n        // Если удаляется точка — сначала удаляем инцидентные отрезки и ограничения\n        auto pit = std::find_if(points.begin(), points.end(),\n                                [id](const std::shared_ptr<PointFigure>& p) { return p->id == id; });\n        if (pit != points.end()) {\n            std::vector<int> segs_to_remove;\n            for (const auto& s : segments) {\n                if (s->p1_id == id || s->p2_id == id) {\n                    segs_to_remove.push_back(s->id);\n                }\n            }\n            for (int sid : segs_to_remove) {\n                removePrimitive(sid);\n            }\n            restrictions.erase(\n                std::remove_if(restrictions.begin(), restrictions.end(),\n                               [id](const Restriction& r) {\n                                   return std::find(r.p_ids.begin(), r.p_ids.end(), id) != r.p_ids.end();\n                               }),\n                restrictions.end()\n            );\n            points.erase(pit);\n            return true;\n        }\n        return false;\n    }\n\n    PointFigure* findPoint(int id) const {\n        for (const auto& p : points) {\n            if (p->id == id) return p.get();\n        }\n        return nullptr;\n    }\n\n    SegmentFigure* findSegment(int id) const {\n        for (const auto& s : segments) {\n            if (s->id == id) return s.get();\n        }\n        return nullptr;\n    }\n\n    void relinkSegments() {\n        for (auto& s : segments) {\n            s->p1_ref = findPoint(s->p1_id);\n            s->p2_ref = findPoint(s->p2_id);\n        }\n    }\n\n    // Serializer JSON (соответствует фиолетовой стрелке serializer -> JSON на схеме бригады)\n    std::string serializeToJson() const {\n        std::ostringstream ss;\n        ss << \"{\\\"primitives\\\":[\";\n        bool first = true;\n        for (const auto& p : points) {\n            if (!first) ss << \",\";\n            first = false;\n            ss << p->toJson();\n        }\n        for (const auto& s : segments) {\n            if (!first) ss << \",\";\n            first = false;\n            ss << s->toJson();\n        }\n        ss << \"],\\\"restrictions\\\":[\";\n        for (size_t i = 0; i < restrictions.size(); ++i) {\n            if (i) ss << \",\";\n            ss << restrictions[i].toJson();\n        }\n        ss << \"]}\";\n        return ss.str();\n    }\n};\n\n} // namespace cad\n", "include/HelperFunctions.hpp": "#pragma once\n#include \"GeomRepository.hpp\"\n#include <cmath>\n#include <vector>\n\nnamespace cad {\n\n/**\n * Helper Functions -> query (соответствует блоку Helper Functions / query на схеме бригады):\n * Поиск объектов по координатам курсора, проверка связности и подсчет степеней свободы (DOF).\n */\nclass HelperFunctions {\npublic:\n    static int queryPointAt(const GeomRepository& repo, double x, double y, double radius = 10.0) {\n        int best_id = -1;\n        double best_dist = radius;\n        for (const auto& p : repo.points) {\n            double d = std::hypot(p->x - x, p->y - y);\n            if (d <= best_dist) {\n                best_dist = d;\n                best_id = p->id;\n            }\n        }\n        return best_id;\n    }\n\n    static int querySegmentAt(const GeomRepository& repo, double x, double y, double tolerance = 8.0) {\n        int best_id = -1;\n        double best_dist = tolerance;\n        for (const auto& s : repo.segments) {\n            if (!s->p1_ref || !s->p2_ref) continue;\n            double x1 = s->p1_ref->x, y1 = s->p1_ref->y;\n            double x2 = s->p2_ref->x, y2 = s->p2_ref->y;\n            double dx = x2 - x1, dy = y2 - y1;\n            double len2 = dx * dx + dy * dy;\n            double t = (len2 > 1e-12) ? ((x - x1) * dx + (y - y1) * dy) / len2 : 0.0;\n            if (t < 0.0) t = 0.0;\n            if (t > 1.0) t = 1.0;\n            double proj_x = x1 + t * dx;\n            double proj_y = y1 + t * dy;\n            double d = std::hypot(x - proj_x, y - proj_y);\n            if (d <= best_dist) {\n                best_dist = d;\n                best_id = s->id;\n            }\n        }\n        return best_id;\n    }\n\n    static int computeDOF(const GeomRepository& repo) {\n        int total_vars = static_cast<int>(repo.points.size()) * 2;\n        int total_eqs = 0;\n        for (const auto& r : repo.restrictions) {\n            total_eqs += r.equationCount();\n        }\n        return total_vars - total_eqs;\n    }\n};\n\n} // namespace cad\n", "include/GeomSolver.hpp": "#pragma once\n#include \"GeomRepository.hpp\"\n#include \"CoreAlgo.hpp\"\n#include <unordered_map>\n\nnamespace cad {\n\n/**\n * Geom Solver (соответствует блоку Geom Solver на схеме бригады):\n * solve(geom, restrictions, new_restrictions) -> new_geom\n */\nclass GeomSolver {\npublic:\n    static OptimizeResult solve(\n        GeomRepository& repo,\n        const std::vector<Restriction>& extra_restrictions = {}\n    ) {\n        int nPoints = static_cast<int>(repo.points.size());\n        int nVars = nPoints * 2;\n        std::vector<double> initial_params(nVars, 0.0);\n        std::unordered_map<int, int> pointIdToVarIdx;\n\n        for (int i = 0; i < nPoints; ++i) {\n            pointIdToVarIdx[repo.points[i]->id] = i * 2;\n            initial_params[i * 2]     = repo.points[i]->x;\n            initial_params[i * 2 + 1] = repo.points[i]->y;\n        }\n\n        // Объединяем основные ограничения репозитория и дополнительные (например, при перетаскивании курсором)\n        std::vector<Restriction> all_restrictions = repo.restrictions;\n        for (const auto& er : extra_restrictions) {\n            all_restrictions.push_back(er);\n        }\n\n        int total_eqs = 0;\n        for (const auto& r : all_restrictions) {\n            total_eqs += r.equationCount();\n        }\n\n        if (nVars == 0 || total_eqs == 0) {\n            OptimizeResult empty_res;\n            empty_res.converged = true;\n            empty_res.iterations = 0;\n            empty_res.max_delta = 0.0;\n            empty_res.max_residual = 0.0;\n            empty_res.final_params = initial_params;\n            return empty_res;\n        }\n\n        auto eval_callback = [&](\n            const std::vector<double>& X,\n            std::vector<double>& f_vec,\n            std::vector<std::vector<double>>& J_f,\n            std::vector<std::vector<std::vector<double>>>& H_f\n        ) {\n            f_vec.assign(total_eqs, 0.0);\n            J_f.assign(total_eqs, std::vector<double>(nVars, 0.0));\n            H_f.assign(total_eqs, std::vector<std::vector<double>>(nVars, std::vector<double>(nVars, 0.0)));\n\n            int row = 0;\n            for (const auto& r : all_restrictions) {\n                std::vector<double> f_loc;\n                std::vector<std::vector<double>> df_loc;\n                std::vector<std::vector<std::vector<double>>> d2f_loc;\n                r.evaluateAnalytical(X, pointIdToVarIdx, f_loc, df_loc, d2f_loc);\n\n                for (size_t k = 0; k < f_loc.size(); ++k) {\n                    f_vec[row] = f_loc[k];\n                    J_f[row]   = df_loc[k];\n                    H_f[row]   = d2f_loc[k];\n                    ++row;\n                }\n            }\n        };\n\n        OptimizeResult res = CoreAlgo::optimize(eval_callback, initial_params, total_eqs, 60, 1e-6);\n\n        // Обновляем координаты точек в GeomRepository (new_geom)\n        for (int i = 0; i < nPoints; ++i) {\n            repo.points[i]->x = res.final_params[i * 2];\n            repo.points[i]->y = res.final_params[i * 2 + 1];\n        }\n        repo.relinkSegments();\n        return res;\n    }\n};\n\n} // namespace cad\n", "include/UseCases.hpp": "#pragma once\n#include \"GeomRepository.hpp\"\n#include \"HelperFunctions.hpp\"\n#include \"GeomSolver.hpp\"\n#include <string>\n#include <sstream>\n\nnamespace cad {\n\n/**\n * Render Usecase, Tool_1 Usecase, Pointer Usecase и API Handler\n * (соответствуют одноименным блокам на схеме бригады).\n */\nclass ApiHandler {\nprivate:\n    GeomRepository repo;\n    OptimizeResult last_solve_result;\n\npublic:\n    ApiHandler() {\n        last_solve_result.converged = true;\n        last_solve_result.iterations = 0;\n        last_solve_result.max_delta = 0.0;\n        last_solve_result.max_residual = 0.0;\n    }\n\n    GeomRepository& getRepository() { return repo; }\n\n    // Render Usecase -> getAllPrimitives\n    std::string getAllPrimitives() const {\n        std::ostringstream ss;\n        ss << std::fixed << std::setprecision(6);\n        ss << \"{\\\"primitives\\\":[\";\n        bool first = true;\n        for (const auto& p : repo.points) {\n            if (!first) ss << \",\";\n            first = false;\n            ss << p->toJson();\n        }\n        for (const auto& s : repo.segments) {\n            if (!first) ss << \",\";\n            first = false;\n            ss << s->toJson();\n        }\n        ss << \"],\\\"restrictions\\\":[\";\n        for (size_t i = 0; i < repo.restrictions.size(); ++i) {\n            if (i) ss << \",\";\n            ss << repo.restrictions[i].toJson();\n        }\n        ss << \"],\\\"solver\\\":{\"\n           << \"\\\"converged\\\":\" << (last_solve_result.converged ? \"true\" : \"false\")\n           << \",\\\"iterations\\\":\" << last_solve_result.iterations\n           << \",\\\"max_delta\\\":\" << last_solve_result.max_delta\n           << \",\\\"max_residual\\\":\" << last_solve_result.max_residual\n           << \",\\\"dof\\\":\" << HelperFunctions::computeDOF(repo)\n           << \"}}\";\n        return ss.str();\n    }\n\n    // Tool_1 Usecase: создание и удаление точек/отрезков и наложение/снятие 9 типов ограничений\n    int createPoint(double x, double y) {\n        auto pt = repo.addPoint(x, y);\n        return pt->id;\n    }\n\n    int createSegment(int p1_id, int p2_id) {\n        auto seg = repo.addSegment(p1_id, p2_id);\n        return seg ? seg->id : -1;\n    }\n\n    bool deletePrimitive(int id) {\n        bool ok = repo.removePrimitive(id);\n        if (ok) last_solve_result = GeomSolver::solve(repo);\n        return ok;\n    }\n\n    int applyRestriction(int type_code, const std::vector<int>& p_ids, const std::vector<int>& seg_ids, double val1, double val2 = 0.0) {\n        Restriction r;\n        r.id = 0;\n        r.type = static_cast<RestrictionType>(type_code);\n        r.p_ids = p_ids;\n        r.seg_ids = seg_ids;\n        r.value = val1;\n        r.value2 = val2;\n        int rid = repo.addRestriction(r);\n        last_solve_result = GeomSolver::solve(repo);\n        return rid;\n    }\n\n    bool removeRestriction(int rid) {\n        bool ok = repo.removeRestriction(rid);\n        if (ok) last_solve_result = GeomSolver::solve(repo);\n        return ok;\n    }\n\n    // Pointer Usecase: перемещение точки с пересчетом геометрии эскиза в реальном времени\n    void movePoint(int point_id, double target_x, double target_y) {\n        PointFigure* pt = repo.findPoint(point_id);\n        if (!pt) return;\n        pt->x = target_x;\n        pt->y = target_y;\n        // При перетаскивании точки задаем её начальное приближение в точке курсора,\n        // а принцип наименьших изменений Лагранжиана (слайд 27) автоматически удерживает её\n        // максимально близко к курсору при соблюдении всех наложенных ограничений!\n        last_solve_result = GeomSolver::solve(repo);\n    }\n\n    const OptimizeResult& getLastSolveResult() const {\n        return last_solve_result;\n    }\n};\n\n} // namespace cad\n", "src/EmscriptenBindings.cpp": "#include \"../include/UseCases.hpp\"\n#include <string>\n\nstatic cad::ApiHandler g_api;\nstatic std::string g_last_json;\n\n#ifdef __EMSCRIPTEN__\n#include <emscripten.h>\n#include <emscripten/bind.h>\n\nextern \"C\" {\n\nEMSCRIPTEN_KEEPALIVE\nconst char* api_get_all_primitives() {\n    g_last_json = g_api.getAllPrimitives();\n    return g_last_json.c_str();\n}\n\nEMSCRIPTEN_KEEPALIVE\nint api_create_point(double x, double y) {\n    return g_api.createPoint(x, y);\n}\n\nEMSCRIPTEN_KEEPALIVE\nint api_create_segment(int p1_id, int p2_id) {\n    return g_api.createSegment(p1_id, p2_id);\n}\n\nEMSCRIPTEN_KEEPALIVE\nint api_delete_primitive(int id) {\n    return g_api.deletePrimitive(id) ? 1 : 0;\n}\n\nEMSCRIPTEN_KEEPALIVE\nint api_add_restriction_2p(int type_code, int p1, int p2, double val1, double val2) {\n    std::vector<int> pids;\n    if (p1 > 0) pids.push_back(p1);\n    if (p2 > 0) pids.push_back(p2);\n    return g_api.applyRestriction(type_code, pids, {}, val1, val2);\n}\n\nEMSCRIPTEN_KEEPALIVE\nint api_add_restriction_4p(int type_code, int p1, int p2, int p3, int p4, int s1, int s2, double val1) {\n    std::vector<int> pids = {p1, p2, p3, p4};\n    std::vector<int> sids = {s1, s2};\n    return g_api.applyRestriction(type_code, pids, sids, val1, 0.0);\n}\n\nEMSCRIPTEN_KEEPALIVE\nint api_add_restriction_point_on_line(int p_id, int lp1_id, int lp2_id, int seg_id) {\n    return g_api.applyRestriction(\n        static_cast<int>(cad::RestrictionType::POINT_ON_LINE),\n        {p_id, lp1_id, lp2_id},\n        {seg_id},\n        0.0, 0.0\n    );\n}\n\nEMSCRIPTEN_KEEPALIVE\nint api_remove_restriction(int rid) {\n    return g_api.removeRestriction(rid) ? 1 : 0;\n}\n\nEMSCRIPTEN_KEEPALIVE\nvoid api_move_point(int point_id, double x, double y) {\n    g_api.movePoint(point_id, x, y);\n}\n\nEMSCRIPTEN_KEEPALIVE\nvoid api_clear() {\n    g_api.getRepository().clear();\n}\n\n} // extern \"C\"\n#endif\n", "tests/test_solver.cpp": "#include \"../include/UseCases.hpp\"\n#include <iostream>\n#include <cassert>\n#include <cmath>\n\nusing namespace cad;\n\nint main() {\n    std::cout << \"=== Тестирование вариационного геометрического решателя (C++ Core) ===\" << std::endl;\n\n    // Тест 1: Пример из презентации РК6 (слайды 30-31):\n    // Фиксация точки P1 в (100, 100) и длина отрезка P1-P2 d = 50, при этом P2 изначально на расстоянии 40.\n    {\n        ApiHandler api;\n        int p1 = api.createPoint(100.0, 100.0);\n        int p2 = api.createPoint(140.0, 100.0); // исходная длина = 40 мм (слайд 16)\n        int seg = api.createSegment(p1, p2);\n\n        // Фиксация точки P1 (ограничение 9)\n        api.applyRestriction(static_cast<int>(RestrictionType::FIX_POINT), {p1}, {}, 100.0, 100.0);\n        // Расстояние между P1 и P2 = 50 мм (ограничение 2)\n        api.applyRestriction(static_cast<int>(RestrictionType::DISTANCE), {p1, p2}, {seg}, 50.0);\n\n        PointFigure* pt1 = api.getRepository().findPoint(p1);\n        PointFigure* pt2 = api.getRepository().findPoint(p2);\n        double dist = std::hypot(pt2->x - pt1->x, pt2->y - pt1->y);\n        std::cout << \"[Тест 1: Фиксация + Длина отрезка (слайд 30)] P1=(\" << pt1->x << \", \" << pt1->y\n                  << \"), P2=(\" << pt2->x << \", \" << pt2->y << \"), L=\" << dist\n                  << \", итераций=\" << api.getLastSolveResult().iterations << std::endl;\n        assert(std::fabs(pt1->x - 100.0) < 1e-5);\n        assert(std::fabs(pt1->y - 100.0) < 1e-5);\n        assert(std::fabs(dist - 50.0) < 1e-5);\n    }\n\n    // Тест 2: Прямоугольник (горизонтальность, вертикальность, перпендикулярность, параллельность, длины)\n    {\n        ApiHandler api;\n        int p1 = api.createPoint(0.0, 0.0);\n        int p2 = api.createPoint(110.0, 15.0);\n        int p3 = api.createPoint(105.0, 85.0);\n        int p4 = api.createPoint(-10.0, 75.0);\n        int s1 = api.createSegment(p1, p2);\n        int s2 = api.createSegment(p2, p3);\n        int s3 = api.createSegment(p3, p4);\n        int s4 = api.createSegment(p4, p1);\n\n        api.applyRestriction(static_cast<int>(RestrictionType::FIX_POINT), {p1}, {}, 0.0, 0.0);\n        api.applyRestriction(static_cast<int>(RestrictionType::HORIZONTAL), {p1, p2}, {s1}, 0.0);\n        api.applyRestriction(static_cast<int>(RestrictionType::VERTICAL), {p4, p1}, {s4}, 0.0);\n        api.applyRestriction(static_cast<int>(RestrictionType::PARALLEL), {p1, p2, p4, p3}, {s1, s3}, 0.0);\n        api.applyRestriction(static_cast<int>(RestrictionType::PERPENDICULAR), {p1, p2, p2, p3}, {s1, s2}, 0.0);\n        api.applyRestriction(static_cast<int>(RestrictionType::DISTANCE), {p1, p2}, {s1}, 120.0);\n        api.applyRestriction(static_cast<int>(RestrictionType::DISTANCE), {p2, p3}, {s2}, 80.0);\n\n        PointFigure* pt2 = api.getRepository().findPoint(p2);\n        PointFigure* pt3 = api.getRepository().findPoint(p3);\n        PointFigure* pt4 = api.getRepository().findPoint(p4);\n        std::cout << \"[Тест 2: Прямоугольник 120x80] P2=(\" << pt2->x << \", \" << pt2->y\n                  << \"), P3=(\" << pt3->x << \", \" << pt3->y\n                  << \"), P4=(\" << pt4->x << \", \" << pt4->y << \")\" << std::endl;\n        assert(std::fabs(pt2->x - 120.0) < 1e-4 && std::fabs(pt2->y - 0.0) < 1e-4);\n        assert(std::fabs(pt3->x - 120.0) < 1e-4 && std::fabs(pt3->y - 80.0) < 1e-4);\n        assert(std::fabs(pt4->x - 0.0) < 1e-4 && std::fabs(pt4->y - 80.0) < 1e-4);\n    }\n\n    // Тест 3: Угол между отрезками (60 градусов), совпадение двух точек и принадлежность точки прямой\n    {\n        ApiHandler api;\n        int p1 = api.createPoint(0.0, 0.0);\n        int p2 = api.createPoint(100.0, 0.0);\n        int p3 = api.createPoint(5.0, 5.0);\n        int p4 = api.createPoint(80.0, 50.0);\n        int p_mid = api.createPoint(40.0, 35.0);\n\n        int s1 = api.createSegment(p1, p2);\n        int s2 = api.createSegment(p3, p4);\n\n        api.applyRestriction(static_cast<int>(RestrictionType::FIX_POINT), {p1}, {}, 0.0, 0.0);\n        api.applyRestriction(static_cast<int>(RestrictionType::HORIZONTAL), {p1, p2}, {s1}, 0.0);\n        api.applyRestriction(static_cast<int>(RestrictionType::DISTANCE), {p1, p2}, {s1}, 100.0);\n        // Совпадение P1 и P3 (ограничение 1)\n        api.applyRestriction(static_cast<int>(RestrictionType::COINCIDENT), {p1, p3}, {}, 0.0);\n        // Длина второго отрезка = 100\n        api.applyRestriction(static_cast<int>(RestrictionType::DISTANCE), {p3, p4}, {s2}, 100.0);\n        // Угол между s1 и s2 = 60 градусов (ограничение 7)\n        api.applyRestriction(static_cast<int>(RestrictionType::ANGLE), {p1, p2, p3, p4}, {s1, s2}, 60.0);\n        // Принадлежность точки p_mid прямой отрезка s2 (ограничение 8)\n        api.applyRestriction(static_cast<int>(RestrictionType::POINT_ON_LINE), {p_mid, p3, p4}, {s2}, 0.0);\n\n        PointFigure* pt3 = api.getRepository().findPoint(p3);\n        PointFigure* pt4 = api.getRepository().findPoint(p4);\n        PointFigure* ptm = api.getRepository().findPoint(p_mid);\n        double cross_line = (ptm->x - pt3->x) * (pt4->y - ptm->y) - (pt4->x - ptm->x) * (ptm->y - pt3->y);\n        std::cout << \"[Тест 3: Совпадение + Угол 60° + Точка на прямой] P3=(\" << pt3->x << \", \" << pt3->y\n                  << \"), P4=(\" << pt4->x << \", \" << pt4->y\n                  << \"), P_mid=(\" << ptm->x << \", \" << ptm->y << \"), cross=\" << cross_line << std::endl;\n        assert(std::hypot(pt3->x, pt3->y) < 1e-4);\n        assert(std::fabs(pt4->x - 50.0) < 1e-3);\n        assert(std::fabs(pt4->y - 86.60254) < 1e-3);\n        assert(std::fabs(cross_line) < 1e-4);\n    }\n\n    std::cout << \"=== Все 9 ограничений и СЛАУ успешно прошли проверку! ===\" << std::endl;\n    return 0;\n}\n", "CMakeLists.txt": "cmake_minimum_required(VERSION 3.14)\nproject(GeomSolverWASM LANGUAGES CXX)\n\nset(CMAKE_CXX_STANDARD 17)\nset(CMAKE_CXX_STANDARD_REQUIRED ON)\n\ninclude_directories(include)\n\nif(EMSCRIPTEN)\n    add_executable(geom_solver src/EmscriptenBindings.cpp)\n    set_target_properties(geom_solver PROPERTIES\n        LINK_FLAGS \"-O3 -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString'] --bind\"\n    )\nelse()\n    add_executable(test_solver tests/test_solver.cpp)\nendif()\n", "build_wasm.sh": "#!/usr/bin/env bash\nset -e\necho \"Сборка C++ ядра в WebAssembly через Emscripten (emcc)...\"\nmkdir -p web/dist\nemcc -std=c++17 -O3 src/EmscriptenBindings.cpp \\\n  -Iinclude \\\n  -s WASM=1 \\\n  -s ALLOW_MEMORY_GROWTH=1 \\\n  -s EXPORTED_RUNTIME_METHODS=\"['ccall','cwrap','UTF8ToString']\" \\\n  -o web/dist/geom_solver.js\necho \"Готово: web/dist/geom_solver.js и web/dist/geom_solver.wasm\"\n"};
+
+    let wasmExports = null;
+
+    async function initWasmCore() {
+      try {
+        const binaryString = atob(WASM_BASE64);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const { instance } = await WebAssembly.instantiate(bytes, {});
+        wasmExports = instance.exports;
+        const badge = document.getElementById('wasmStatusBadge');
+        if (badge) {
+          badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> WASM CoreAlgo::solve Активен';
+        }
+      } catch (err) {
+        console.warn("Fallback to JS CoreAlgo::solve:", err);
+      }
+    }
+
+    // =========================================================================
+    // 2. АРХИТЕКТУРА БЭКЕНДА (ПОЛНОЕ ЗЕРКАЛО C++ КЛАССОВ ИЗ СХЕМЫ БРИГАДЫ)
+    // =========================================================================
+
+    /**
+     * Базовый класс геометрического примитива (Figure)
+     * Geom = Figure[]; class Figure: params()
+     */
+    class Figure {
+      constructor(id, type, label) {
+        this.id = id;
+        this.type = type;
+        this.label = label;
+      }
+      params() { return []; }
+    }
+
+    class PointFigure extends Figure {
+      constructor(id, x, y, label = "") {
+        super(id, "point", label || ("P" + id));
+        this.x = x;
+        this.y = y;
+      }
+      params() {
+        return [this.x, this.y];
+      }
+    }
+
+    class SegmentFigure extends Figure {
+      constructor(id, p1_id, p2_id, p1_ref, p2_ref, label = "") {
+        super(id, "line", label || ("L" + id));
+        this.p1_id = p1_id;
+        this.p2_id = p2_id;
+        this.p1_ref = p1_ref;
+        this.p2_ref = p2_ref;
+      }
+      params() {
+        if (this.p1_ref && this.p2_ref) {
+          return [this.p1_ref.x, this.p1_ref.y, this.p2_ref.x, this.p2_ref.y];
+        }
+        return [];
+      }
+    }
+
+    /**
+     * Справочник 9 типов ограничений (слайды 28–29 презентации РК6)
+     */
+    const RestrictionMeta = {
+      COINCIDENT: {
+        code: 1, name: "Совпадение точек", badge: "◎", eqs: 2,
+        formula: "x₂+Δx₂−x₁−Δx₁ = 0; y₂+Δy₂−y₁−Δy₁ = 0"
+      },
+      DISTANCE: {
+        code: 2, name: "Расстояние между точками", badge: "↔", eqs: 1,
+        formula: "(X₂−X₁)² + (Y₂−Y₁)² − d² = 0"
+      },
+      PARALLEL: {
+        code: 3, name: "Параллельность отрезков", badge: "∥", eqs: 1,
+        formula: "(X₂−X₁)(Y₄−Y₃) − (X₄−X₃)(Y₂−Y₁) = 0"
+      },
+      PERPENDICULAR: {
+        code: 4, name: "Перпендикулярность отрезков", badge: "⊥", eqs: 1,
+        formula: "(X₂−X₁)(X₄−X₃) + (Y₂−Y₁)(Y₄−Y₃) = 0"
+      },
+      VERTICAL: {
+        code: 5, name: "Вертикальность отрезка", badge: "V", eqs: 1,
+        formula: "x₂ + Δx₂ − x₁ − Δx₁ = 0"
+      },
+      HORIZONTAL: {
+        code: 6, name: "Горизонтальность отрезка", badge: "H", eqs: 1,
+        formula: "y₂ + Δy₂ − y₁ − Δy₁ = 0"
+      },
+      ANGLE: {
+        code: 7, name: "Угол между отрезками", badge: "∠", eqs: 1,
+        formula: "(v₁₂ · v₃₄) − |v₁₂||v₃₄| cos(α) = 0"
+      },
+      POINT_ON_LINE: {
+        code: 8, name: "Принадлежность точки прямой", badge: "∈", eqs: 1,
+        formula: "(X_P−X₁)(Y₂−Y_P) − (X₂−X_P)(Y_P−Y₁) = 0"
+      },
+      FIX_POINT: {
+        code: 9, name: "Фиксация точки", badge: "🔒", eqs: 2,
+        formula: "x + Δx − x_c = 0; y + Δy − y_c = 0"
+      }
+    };
+
+    /**
+     * Вычисление аналитических значений уравнений и аналитических частных производных
+     * (1-го и 2-го порядка), жестко зашитых в код (слайды 28–31 презентации РК6).
+     */
+    function evaluateRestrictionAnalytical(r, X, pointIdToVarIdx) {
+      const nVars = X.length;
+      const eqCount = (r.type === "COINCIDENT" || r.type === "FIX_POINT") ? 2 : 1;
+      const f_out = new Array(eqCount).fill(0.0);
+      const df_out = Array.from({ length: eqCount }, () => new Array(nVars).fill(0.0));
+      const symbolic = [];
+
+      const idxX = (pid) => pointIdToVarIdx.get(pid);
+      const idxY = (pid) => pointIdToVarIdx.get(pid) + 1;
+
+      switch (r.type) {
+        case "COINCIDENT": {
+          const ix1 = idxX(r.p_ids[0]), iy1 = idxY(r.p_ids[0]);
+          const ix2 = idxX(r.p_ids[1]), iy2 = idxY(r.p_ids[1]);
+          f_out[0] = X[ix2] - X[ix1];
+          df_out[0][ix1] = -1.0;
+          df_out[0][ix2] =  1.0;
+
+          f_out[1] = X[iy2] - X[iy1];
+          df_out[1][iy1] = -1.0;
+          df_out[1][iy2] =  1.0;
+          symbolic.push(`∂f₁/∂Δx₁ = -1, ∂f₁/∂Δx₂ = +1`);
+          symbolic.push(`∂f₂/∂Δy₁ = -1, ∂f₂/∂Δy₂ = +1`);
+          break;
+        }
+        case "DISTANCE": {
+          const ix1 = idxX(r.p_ids[0]), iy1 = idxY(r.p_ids[0]);
+          const ix2 = idxX(r.p_ids[1]), iy2 = idxY(r.p_ids[1]);
+          const dx = X[ix2] - X[ix1];
+          const dy = X[iy2] - X[iy1];
+          const d = r.value;
+          f_out[0] = dx * dx + dy * dy - d * d;
+          df_out[0][ix1] = -2.0 * dx;
+          df_out[0][iy1] = -2.0 * dy;
+          df_out[0][ix2] =  2.0 * dx;
+          df_out[0][iy2] =  2.0 * dy;
+          symbolic.push(`∂f/∂Δx₁ = -2(X₂-X₁) = ${(-2*dx).toFixed(1)}, ∂f/∂Δy₁ = -2(Y₂-Y₁) = ${(-2*dy).toFixed(1)}, ∂f/∂Δx₂ = ${(2*dx).toFixed(1)}, ∂f/∂Δy₂ = ${(2*dy).toFixed(1)}`);
+          break;
+        }
+        case "PARALLEL": {
+          const ix1 = idxX(r.p_ids[0]), iy1 = idxY(r.p_ids[0]);
+          const ix2 = idxX(r.p_ids[1]), iy2 = idxY(r.p_ids[1]);
+          const ix3 = idxX(r.p_ids[2]), iy3 = idxY(r.p_ids[2]);
+          const ix4 = idxX(r.p_ids[3]), iy4 = idxY(r.p_ids[3]);
+          const ux = X[ix2] - X[ix1], uy = X[iy2] - X[iy1];
+          const vx = X[ix4] - X[ix3], vy = X[iy4] - X[iy3];
+          f_out[0] = ux * vy - vx * uy;
+          df_out[0][ix1] += -vy; df_out[0][iy1] +=  vx;
+          df_out[0][ix2] +=  vy; df_out[0][iy2] += -vx;
+          df_out[0][ix3] +=  uy; df_out[0][iy3] += -ux;
+          df_out[0][ix4] += -uy; df_out[0][iy4] +=  ux;
+          symbolic.push(`∂f/∂Δx₁ = -v_y, ∂f/∂Δy₁ = v_x, ∂f/∂Δx₂ = v_y, ∂f/∂Δy₂ = -v_x, ∂f/∂Δx₃ = u_y, ∂f/∂Δy₃ = -u_x, ∂f/∂Δx₄ = -u_y, ∂f/∂Δy₄ = u_x`);
+          break;
+        }
+        case "PERPENDICULAR": {
+          const ix1 = idxX(r.p_ids[0]), iy1 = idxY(r.p_ids[0]);
+          const ix2 = idxX(r.p_ids[1]), iy2 = idxY(r.p_ids[1]);
+          const ix3 = idxX(r.p_ids[2]), iy3 = idxY(r.p_ids[2]);
+          const ix4 = idxX(r.p_ids[3]), iy4 = idxY(r.p_ids[3]);
+          const ux = X[ix2] - X[ix1], uy = X[iy2] - X[iy1];
+          const vx = X[ix4] - X[ix3], vy = X[iy4] - X[iy3];
+          f_out[0] = ux * vx + uy * vy;
+          df_out[0][ix1] += -vx; df_out[0][iy1] += -vy;
+          df_out[0][ix2] +=  vx; df_out[0][iy2] +=  vy;
+          df_out[0][ix3] += -ux; df_out[0][iy3] += -uy;
+          df_out[0][ix4] +=  ux; df_out[0][iy4] +=  uy;
+          symbolic.push(`∂f/∂Δx₁ = -v_x, ∂f/∂Δy₁ = -v_y, ∂f/∂Δx₂ = v_x, ∂f/∂Δy₂ = v_y, ∂f/∂Δx₃ = -u_x, ∂f/∂Δy₃ = -u_y, ∂f/∂Δx₄ = u_x, ∂f/∂Δy₄ = u_y`);
+          break;
+        }
+        case "VERTICAL": {
+          const ix1 = idxX(r.p_ids[0]), ix2 = idxX(r.p_ids[1]);
+          f_out[0] = X[ix2] - X[ix1];
+          df_out[0][ix1] = -1.0;
+          df_out[0][ix2] =  1.0;
+          symbolic.push(`∂f/∂Δx₁ = -1, ∂f/∂Δx₂ = +1`);
+          break;
+        }
+        case "HORIZONTAL": {
+          const iy1 = idxY(r.p_ids[0]), iy2 = idxY(r.p_ids[1]);
+          f_out[0] = X[iy2] - X[iy1];
+          df_out[0][iy1] = -1.0;
+          df_out[0][iy2] =  1.0;
+          symbolic.push(`∂f/∂Δy₁ = -1, ∂f/∂Δy₂ = +1`);
+          break;
+        }
+        case "ANGLE": {
+          const ix1 = idxX(r.p_ids[0]), iy1 = idxY(r.p_ids[0]);
+          const ix2 = idxX(r.p_ids[1]), iy2 = idxY(r.p_ids[1]);
+          const ix3 = idxX(r.p_ids[2]), iy3 = idxY(r.p_ids[2]);
+          const ix4 = idxX(r.p_ids[3]), iy4 = idxY(r.p_ids[3]);
+          const ux = X[ix2] - X[ix1], uy = X[iy2] - X[iy1];
+          const vx = X[ix4] - X[ix3], vy = X[iy4] - X[iy3];
+          const L1 = Math.max(Math.hypot(ux, uy), 1e-9);
+          const L2 = Math.max(Math.hypot(vx, vy), 1e-9);
+          const alphaRad = (r.value * Math.PI) / 180.0;
+          const c = Math.cos(alphaRad);
+
+          f_out[0] = (ux * vx + uy * vy) - L1 * L2 * c;
+          const df_dux = vx - (ux / L1) * L2 * c;
+          const df_duy = vy - (uy / L1) * L2 * c;
+          const df_dvx = ux - L1 * (vx / L2) * c;
+          const df_dvy = uy - L1 * (vy / L2) * c;
+
+          df_out[0][ix1] += -df_dux; df_out[0][iy1] += -df_duy;
+          df_out[0][ix2] +=  df_dux; df_out[0][iy2] +=  df_duy;
+          df_out[0][ix3] += -df_dvx; df_out[0][iy3] += -df_dvy;
+          df_out[0][ix4] +=  df_dvx; df_out[0][iy4] +=  df_dvy;
+          symbolic.push(`∂f/∂u = v − (u/|u|)|v|cos(${r.value}°), ∂f/∂v = u − |u|(v/|v|)cos(${r.value}°)`);
+          break;
+        }
+        case "POINT_ON_LINE": {
+          const ixp = idxX(r.p_ids[0]), iyp = idxY(r.p_ids[0]);
+          const ix1 = idxX(r.p_ids[1]), iy1 = idxY(r.p_ids[1]);
+          const ix2 = idxX(r.p_ids[2]), iy2 = idxY(r.p_ids[2]);
+          const xp = X[ixp], yp = X[iyp];
+          const x1 = X[ix1], y1 = X[iy1];
+          const x2 = X[ix2], y2 = X[iy2];
+
+          f_out[0] = (xp - x1) * (y2 - yp) - (x2 - xp) * (yp - y1);
+          df_out[0][ixp] += (y2 - y1);
+          df_out[0][iyp] += -(x2 - x1);
+          df_out[0][ix1] += -(y2 - yp);
+          df_out[0][iy1] += (x2 - xp);
+          df_out[0][ix2] += -(yp - y1);
+          df_out[0][iy2] += (xp - x1);
+          symbolic.push(`∂f/∂Δx_P = Y₂−Y₁, ∂f/∂Δy_P = −(X₂−X₁), ∂f/∂Δx₁ = −(Y₂−Y_P), ∂f/∂Δy₁ = X₂−X_P`);
+          break;
+        }
+        case "FIX_POINT": {
+          const ix = idxX(r.p_ids[0]), iy = idxY(r.p_ids[0]);
+          f_out[0] = X[ix] - r.value;
+          df_out[0][ix] = 1.0;
+
+          f_out[1] = X[iy] - r.value2;
+          df_out[1][iy] = 1.0;
+          symbolic.push(`∂f₁/∂Δx = 1 (x_c = ${r.value.toFixed(1)})`);
+          symbolic.push(`∂f₂/∂Δy = 1 (y_c = ${r.value2.toFixed(1)})`);
+          break;
+        }
+      }
+      return { f_out, df_out, symbolic };
+    }
+
+    /**
+     * Core Algo (соответствует блоку Core Algo на схеме бригады):
+     * - solve(A, b): вызывает скомпилированный WebAssembly модуль solve_slae (метод Гаусса с выбором главного элемента без библиотек)
+     * - optimize(f, df, params): метод Ньютона для системы Лагранжа (**)
+     */
+    class CoreAlgo {
+      static solve(A, b) {
+        const n = b.length;
+        if (n === 0) return [];
+
+        // Если доступен WASM-модуль и размерность помещается в буфер (1 МБ), вызываем WebAssembly solve_slae
+        if (wasmExports && n <= 220) {
+          const f64 = new Float64Array(wasmExports.memory.buffer);
+          const aOffset = 0;
+          const bOffset = n * n;
+          const xOffset = n * n + n;
+          let ptr = 0;
+          for (let i = 0; i < n; i++) {
+            const row = A[i];
+            for (let j = 0; j < n; j++) {
+              f64[ptr++] = row[j];
+            }
+          }
+          for (let i = 0; i < n; i++) {
+            f64[bOffset + i] = b[i];
+          }
+          wasmExports.solve_slae(n, aOffset * 8, bOffset * 8, xOffset * 8);
+          const res = new Array(n);
+          for (let i = 0; i < n; i++) {
+            res[i] = f64[xOffset + i];
+          }
+          return res;
+        }
+
+        // Резервный собственный метод Гаусса (без библиотек)
+        const M = A.map(row => row.slice());
+        const rhs = b.slice();
+        for (let k = 0; k < n; k++) {
+          let maxRow = k;
+          let maxVal = Math.abs(M[k][k]);
+          for (let i = k + 1; i < n; i++) {
+            const v = Math.abs(M[i][k]);
+            if (v > maxVal) { maxVal = v; maxRow = i; }
+          }
+          if (maxRow !== k) {
+            const tmpR = M[k]; M[k] = M[maxRow]; M[maxRow] = tmpR;
+            const tmpB = rhs[k]; rhs[k] = rhs[maxRow]; rhs[maxRow] = tmpB;
+          }
+          if (Math.abs(M[k][k]) < 1e-11) M[k][k] = 1e-11;
+          const pivot = M[k][k];
+          for (let i = k + 1; i < n; i++) {
+            const factor = M[i][k] / pivot;
+            M[i][k] = 0.0;
+            for (let j = k + 1; j < n; j++) M[i][j] -= factor * M[k][j];
+            rhs[i] -= factor * rhs[k];
+          }
+        }
+        const x = new Array(n).fill(0.0);
+        for (let i = n - 1; i >= 0; i--) {
+          let sum = rhs[i];
+          for (let j = i + 1; j < n; j++) sum -= M[i][j] * x[j];
+          x[i] = sum / M[i][i];
+        }
+        return x;
+      }
+
+      static optimize(evalCallback, initialParams, numEquations, maxIterations = 60, eps = 1e-6, varWeights = null) {
+        const n = initialParams.length;
+        const m = numEquations;
+        const p = initialParams.slice();
+        if (n === 0 || m === 0) {
+          return {
+            converged: true, iterations: 0, max_delta: 0, max_residual: 0,
+            final_params: p, last_jacobian: [], last_rhs: [], last_solution: [], eq_details: []
+          };
+        }
+
+        const totalDim = m + n;
+        let lastJacobian = [];
+        let lastRhs = [];
+        let lastSol = [];
+        let lastEqDetails = [];
+        let iterations = 0;
+        let maxDelta = 0;
+        let maxResidual = 0;
+
+        for (let iter = 0; iter < maxIterations; iter++) {
+          iterations = iter + 1;
+          const { f_vec, J_f, eq_details } = evalCallback(p);
+          lastEqDetails = eq_details;
+
+          maxResidual = 0;
+          for (let j = 0; j < m; j++) {
+            const af = Math.abs(f_vec[j]);
+            if (af > maxResidual) maxResidual = af;
+          }
+
+          // Строим матрицу Якоби для системы Лагранжа (**) со слайда 31:
+          // Первые m строк: ∂F/∂λ_j = f_j(p + Δp) = 0  =>  J_f * Δp = -f(p)
+          // Следующие n строк: ∂F/∂Δp_i = w_i * Δp_i + ∑ λ_j * (∂f_j/∂Δp_i) = 0
+          const A = Array.from({ length: totalDim }, () => new Array(totalDim).fill(0.0));
+          const b = new Array(totalDim).fill(0.0);
+
+          for (let j = 0; j < m; j++) {
+            for (let i = 0; i < n; i++) {
+              A[j][i] = J_f[j][i];
+            }
+            // Малая регуляризация диагонали множителей Лагранжа для устойчивости при избыточных ограничениях
+            A[j][n + j] = -1e-9;
+            b[j] = -f_vec[j];
+          }
+
+          for (let i = 0; i < n; i++) {
+            A[m + i][i] = varWeights ? varWeights[i] : 1.0;
+            for (let j = 0; j < m; j++) {
+              A[m + i][n + j] = J_f[j][i];
+            }
+            b[m + i] = 0.0;
+          }
+
+          const sol = CoreAlgo.solve(A, b);
+          if (iter === 0) {
+            lastJacobian = A;
+            lastRhs = b;
+            lastSol = sol;
+          }
+
+          let maxDp = 0;
+          for (let i = 0; i < n; i++) {
+            const ad = Math.abs(sol[i]);
+            if (ad > maxDp) maxDp = ad;
+          }
+
+          let stepScale = 1.0;
+          const maxAllowedStep = 75.0;
+          if (maxDp > maxAllowedStep) {
+            stepScale = maxAllowedStep / maxDp;
+          }
+
+          maxDelta = 0;
+          for (let i = 0; i < n; i++) {
+            const dp = sol[i] * stepScale;
+            p[i] += dp;
+            if (Math.abs(dp) > maxDelta) maxDelta = Math.abs(dp);
+          }
+
+          if (maxDelta < eps && maxResidual < eps * 10) {
+            break;
+          }
+        }
+
+        const finalEval = evalCallback(p);
+        let finalMaxRes = 0;
+        for (const v of finalEval.f_vec) {
+          if (Math.abs(v) > finalMaxRes) finalMaxRes = Math.abs(v);
+        }
+
+        return {
+          converged: finalMaxRes < 1e-2,
+          iterations,
+          max_delta: maxDelta,
+          max_residual: finalMaxRes,
+          final_params: p,
+          last_jacobian: lastJacobian,
+          last_rhs: lastRhs,
+          last_solution: lastSol,
+          eq_details: finalEval.eq_details
+        };
+      }
+    }
+
+    /**
+     * GeomRepository (хранит примитивы Geom = Figure[], Restrictions и JSON Serializer)
+     */
+    class GeomRepository {
+      constructor() {
+        this.points = [];
+        this.segments = [];
+        this.restrictions = [];
+        this.nextId = 1;
+      }
+
+      clear() {
+        this.points = [];
+        this.segments = [];
+        this.restrictions = [];
+        this.nextId = 1;
+      }
+
+      addPoint(x, y, label = "") {
+        const id = this.nextId++;
+        const pt = new PointFigure(id, x, y, label || `P${this.points.length + 1}`);
+        this.points.push(pt);
+        return pt;
+      }
+
+      addSegment(p1_id, p2_id, label = "") {
+        const r1 = this.findPoint(p1_id);
+        const r2 = this.findPoint(p2_id);
+        if (!r1 || !r2 || p1_id === p2_id) return null;
+        const exists = this.segments.find(s =>
+          (s.p1_id === p1_id && s.p2_id === p2_id) || (s.p1_id === p2_id && s.p2_id === p1_id)
+        );
+        if (exists) return exists;
+        const id = this.nextId++;
+        const seg = new SegmentFigure(id, p1_id, p2_id, r1, r2, label || `L${this.segments.length + 1}`);
+        this.segments.push(seg);
+        return seg;
+      }
+
+      findPoint(id) {
+        return this.points.find(p => p.id === id) || null;
+      }
+
+      findSegment(id) {
+        return this.segments.find(s => s.id === id) || null;
+      }
+
+      relinkSegments() {
+        for (const s of this.segments) {
+          s.p1_ref = this.findPoint(s.p1_id);
+          s.p2_ref = this.findPoint(s.p2_id);
+        }
+      }
+
+      addRestriction(type, p_ids, seg_ids = [], value = 0, value2 = 0) {
+        const id = this.nextId++;
+        const r = { id, type, p_ids: [...p_ids], seg_ids: [...seg_ids], value: Number(value), value2: Number(value2), residual: 0 };
+        this.restrictions.push(r);
+        return r;
+      }
+
+      removeRestriction(rid) {
+        const idx = this.restrictions.findIndex(r => r.id === rid);
+        if (idx === -1) return false;
+        this.restrictions.splice(idx, 1);
+        return true;
+      }
+
+      removePrimitive(id) {
+        const segIdx = this.segments.findIndex(s => s.id === id);
+        if (segIdx !== -1) {
+          this.segments.splice(segIdx, 1);
+          this.restrictions = this.restrictions.filter(r => !r.seg_ids.includes(id));
+          return true;
+        }
+        const ptIdx = this.points.findIndex(p => p.id === id);
+        if (ptIdx !== -1) {
+          const segIdsToRemove = this.segments.filter(s => s.p1_id === id || s.p2_id === id).map(s => s.id);
+          for (const sid of segIdsToRemove) {
+            this.removePrimitive(sid);
+          }
+          this.restrictions = this.restrictions.filter(r => !r.p_ids.includes(id));
+          this.points.splice(ptIdx, 1);
+          return true;
+        }
+        return false;
+      }
+
+      serializeToJson() {
+        return JSON.stringify({
+          points: this.points.map(p => ({ id: p.id, label: p.label, x: Number(p.x.toFixed(4)), y: Number(p.y.toFixed(4)) })),
+          segments: this.segments.map(s => ({ id: s.id, label: s.label, p1_id: s.p1_id, p2_id: s.p2_id })),
+          restrictions: this.restrictions.map(r => ({
+            id: r.id, type: r.type, p_ids: r.p_ids, seg_ids: r.seg_ids,
+            value: Number(r.value.toFixed(4)), value2: Number(r.value2.toFixed(4))
+          }))
+        }, null, 2);
+      }
+
+      loadFromJson(jsonStr) {
+        const data = JSON.parse(jsonStr);
+        this.clear();
+        let maxId = 0;
+        for (const p of (data.points || [])) {
+          const pt = new PointFigure(p.id, Number(p.x), Number(p.y), p.label);
+          this.points.push(pt);
+          if (p.id > maxId) maxId = p.id;
+        }
+        for (const s of (data.segments || [])) {
+          const seg = new SegmentFigure(s.id, s.p1_id, s.p2_id, this.findPoint(s.p1_id), this.findPoint(s.p2_id), s.label);
+          this.segments.push(seg);
+          if (s.id > maxId) maxId = s.id;
+        }
+        for (const r of (data.restrictions || [])) {
+          this.restrictions.push({
+            id: r.id, type: r.type, p_ids: r.p_ids || [], seg_ids: r.seg_ids || [],
+            value: Number(r.value || 0), value2: Number(r.value2 || 0), residual: 0
+          });
+          if (r.id > maxId) maxId = r.id;
+        }
+        this.nextId = maxId + 1;
+      }
+    }
+
+    /**
+     * HelperFunctions (модуль query на схеме бригады)
+     */
+    class HelperFunctions {
+      static queryPointAt(repo, worldX, worldY, radiusWorld) {
+        let best = null;
+        let bestDist = radiusWorld;
+        for (const p of repo.points) {
+          const d = Math.hypot(p.x - worldX, p.y - worldY);
+          if (d <= bestDist) {
+            bestDist = d;
+            best = p;
+          }
+        }
+        return best;
+      }
+
+      static querySegmentAt(repo, worldX, worldY, tolWorld) {
+        let best = null;
+        let bestDist = tolWorld;
+        for (const s of repo.segments) {
+          if (!s.p1_ref || !s.p2_ref) continue;
+          const x1 = s.p1_ref.x, y1 = s.p1_ref.y;
+          const x2 = s.p2_ref.x, y2 = s.p2_ref.y;
+          const dx = x2 - x1, dy = y2 - y1;
+          const len2 = dx * dx + dy * dy;
+          let t = len2 > 1e-12 ? ((worldX - x1) * dx + (worldY - y1) * dy) / len2 : 0;
+          t = Math.max(0, Math.min(1, t));
+          const px = x1 + t * dx, py = y1 + t * dy;
+          const d = Math.hypot(worldX - px, worldY - py);
+          if (d <= bestDist) {
+            bestDist = d;
+            best = s;
+          }
+        }
+        return best;
+      }
+
+      static computeDOF(repo) {
+        const totalVars = repo.points.length * 2;
+        let totalEqs = 0;
+        for (const r of repo.restrictions) {
+          totalEqs += RestrictionMeta[r.type]?.eqs || 1;
+        }
+        return { totalVars, totalEqs, dof: totalVars - totalEqs };
+      }
+    }
+
+    /**
+     * GeomSolver (solve(geom, restrictions, new_restrictions) -> new_geom)
+     */
+    class GeomSolver {
+      static solve(repo, draggedPointIds = []) {
+        const nPoints = repo.points.length;
+        const nVars = nPoints * 2;
+        const initialParams = new Array(nVars);
+        const varWeights = new Array(nVars).fill(1.0);
+        const pointIdToVarIdx = new Map();
+
+        for (let i = 0; i < nPoints; i++) {
+          const pt = repo.points[i];
+          pointIdToVarIdx.set(pt.id, i * 2);
+          initialParams[i * 2] = pt.x;
+          initialParams[i * 2 + 1] = pt.y;
+          // При перетаскивании точки мышью её вес в целевой функции ½ ∑ w_i Δp_i² выше,
+          // чтобы она следовала за курсором при соблюдении жестких ограничений
+          if (draggedPointIds.includes(pt.id)) {
+            varWeights[i * 2] = 25.0;
+            varWeights[i * 2 + 1] = 25.0;
+          }
+        }
+
+        let totalEqs = 0;
+        for (const r of repo.restrictions) {
+          totalEqs += RestrictionMeta[r.type]?.eqs || 1;
+        }
+
+        const evalCallback = (X) => {
+          const f_vec = [];
+          const J_f = [];
+          const eq_details = [];
+
+          for (const r of repo.restrictions) {
+            const { f_out, df_out, symbolic } = evaluateRestrictionAnalytical(r, X, pointIdToVarIdx);
+            let maxR = 0;
+            for (let k = 0; k < f_out.length; k++) {
+              f_vec.push(f_out[k]);
+              J_f.push(df_out[k]);
+              if (Math.abs(f_out[k]) > maxR) maxR = Math.abs(f_out[k]);
+              eq_details.push({
+                restriction: r,
+                eqIndex: f_vec.length,
+                f_val: f_out[k],
+                df_row: df_out[k],
+                symbolic: symbolic[k] || symbolic[0] || ""
+              });
+            }
+            r.residual = maxR;
+          }
+          return { f_vec, J_f, eq_details };
+        };
+
+        const res = CoreAlgo.optimize(evalCallback, initialParams, totalEqs, 60, 1e-6, varWeights);
+
+        for (let i = 0; i < nPoints; i++) {
+          repo.points[i].x = res.final_params[i * 2];
+          repo.points[i].y = res.final_params[i * 2 + 1];
+        }
+        repo.relinkSegments();
+        return res;
+      }
+    }
+
+    /**
+     * API Handler (Render Usecase, Tool_1 Usecase, Pointer Usecase)
+     */
+    class ApiHandler {
+      constructor() {
+        this.repo = new GeomRepository();
+        this.lastSolveResult = {
+          converged: true, iterations: 0, max_delta: 0, max_residual: 0,
+          last_jacobian: [], last_rhs: [], last_solution: [], eq_details: []
+        };
+      }
+
+      getAllPrimitives() {
+        return {
+          primitives: [...this.repo.points, ...this.repo.segments],
+          points: this.repo.points,
+          segments: this.repo.segments,
+          restrictions: this.repo.restrictions,
+          solver: this.lastSolveResult,
+          dofInfo: HelperFunctions.computeDOF(this.repo)
+        };
+      }
+
+      solveSketch(draggedPointIds = []) {
+        this.lastSolveResult = GeomSolver.solve(this.repo, draggedPointIds);
+        return this.lastSolveResult;
+      }
+    }
+
+    // =========================================================================
+    // 3. СОСТОЯНИЕ ВИЗУАЛИЗАЦИИ И ИНТЕРАКТИВНОГО РЕДАКТОРА (JS FRONTEND)
+    // =========================================================================
+    const api = new ApiHandler();
+
+    const uiState = {
+      activeTool: "select",         // 'select' | 'point' | 'segment' | 'delete'
+      activeConstraintTool: null,   // null или тип ограничения при пошаговом выборе на холсте
+      selectedPointIds: [],
+      selectedSegmentIds: [],
+      hoveredPointId: null,
+      hoveredSegmentId: null,
+      segmentStartPointId: null,
+      draggingPointId: null,
+      draggingSegmentId: null,
+      dragLastWorld: { x: 0, y: 0 },
+      isPanning: false,
+      panLastScreen: { x: 0, y: 0 },
+      camera: { x: 0, y: 0, scale: 1.8 }, // в пикселях на 1 мм
+      mouseWorld: { x: 0, y: 0 },
+      snapToGrid: false,
+      pendingModalCallback: null
+    };
+
+    const canvas = document.getElementById("cadCanvas");
+    const ctx = canvas.getContext("2d");
+
+    function showToast(msg) {
+      const el = document.getElementById("toastBanner");
+      el.textContent = msg;
+      el.classList.remove("hidden");
+      clearTimeout(showToast._timer);
+      showToast._timer = setTimeout(() => el.classList.add("hidden"), 3200);
+    }
+
+    function worldToScreen(wx, wy) {
+      const cx = canvas.width / 2 + uiState.camera.x;
+      const cy = canvas.height / 2 + uiState.camera.y;
+      return {
+        x: cx + wx * uiState.camera.scale,
+        y: cy - wy * uiState.camera.scale
+      };
+    }
+
+    function screenToWorld(sx, sy) {
+      const cx = canvas.width / 2 + uiState.camera.x;
+      const cy = canvas.height / 2 + uiState.camera.y;
+      let wx = (sx - cx) / uiState.camera.scale;
+      let wy = (cy - sy) / uiState.camera.scale;
+      if (uiState.snapToGrid) {
+        wx = Math.round(wx / 10) * 10;
+        wy = Math.round(wy / 10) * 10;
+      }
+      return { x: wx, y: wy };
+    }
+
+    function resizeCanvas() {
+      const container = document.getElementById("canvasContainer");
+      const rect = container.getBoundingClientRect();
+      canvas.width = Math.max(300, Math.floor(rect.width));
+      canvas.height = Math.max(300, Math.floor(rect.height));
+      renderAll();
+    }
+
+    window.addEventListener("resize", resizeCanvas);
+
+    // =========================================================================
+    // 4. ОТРИСОВКА РАБОЧЕГО ПОЛЯ (Render Usecase)
+    // =========================================================================
+    function renderCanvas() {
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      // Фон
+      ctx.fillStyle = "#090d16";
+      ctx.fillRect(0, 0, w, h);
+
+      const cx = w / 2 + uiState.camera.x;
+      const cy = h / 2 + uiState.camera.y;
+      const scale = uiState.camera.scale;
+
+      // Сетка
+      const gridStepMM = scale > 1.1 ? 10 : (scale > 0.4 ? 25 : 50);
+      const stepPx = gridStepMM * scale;
+
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(30, 41, 59, 0.65)";
+      ctx.beginPath();
+      for (let x = cx % stepPx; x < w; x += stepPx) {
+        ctx.moveTo(x, 0); ctx.lineTo(x, h);
+      }
+      for (let y = cy % stepPx; y < h; y += stepPx) {
+        ctx.moveTo(0, y); ctx.lineTo(w, y);
+      }
+      ctx.stroke();
+
+      // Главные оси координат X и Y
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = "rgba(71, 85, 105, 0.85)";
+      ctx.beginPath();
+      ctx.moveTo(0, cy); ctx.lineTo(w, cy);
+      ctx.moveTo(cx, 0); ctx.lineTo(cx, h);
+      ctx.stroke();
+
+      ctx.fillStyle = "#64748b";
+      ctx.font = "11px 'JetBrains Mono', monospace";
+      ctx.fillText("X", w - 18, cy - 6);
+      ctx.fillText("Y", cx + 6, 16);
+      ctx.fillText("(0,0)", cx + 5, cy + 14);
+
+      const state = api.getAllPrimitives();
+
+      // Пунктирные линии продолжения для POINT_ON_LINE
+      for (const r of state.restrictions) {
+        if (r.type === "POINT_ON_LINE") {
+          const pt = api.repo.findPoint(r.p_ids[0]);
+          const p1 = api.repo.findPoint(r.p_ids[1]);
+          const p2 = api.repo.findPoint(r.p_ids[2]);
+          if (pt && p1 && p2) {
+            const sPt = worldToScreen(pt.x, pt.y);
+            const sP1 = worldToScreen(p1.x, p1.y);
+            ctx.save();
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = "rgba(34, 211, 238, 0.45)";
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(sP1.x, sP1.y);
+            ctx.lineTo(sPt.x, sPt.y);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+      }
+
+      // Отрисовка размерных выносок для DISTANCE и дуг для ANGLE
+      for (const r of state.restrictions) {
+        if (r.type === "DISTANCE") {
+          const p1 = api.repo.findPoint(r.p_ids[0]);
+          const p2 = api.repo.findPoint(r.p_ids[1]);
+          if (p1 && p2) {
+            drawDistanceDimension(p1, p2, r.value);
+          }
+        } else if (r.type === "ANGLE") {
+          const p1 = api.repo.findPoint(r.p_ids[0]);
+          const p2 = api.repo.findPoint(r.p_ids[1]);
+          const p3 = api.repo.findPoint(r.p_ids[2]);
+          const p4 = api.repo.findPoint(r.p_ids[3]);
+          if (p1 && p2 && p3 && p4) {
+            drawAngleAnnotation(p1, p2, p3, p4, r.value);
+          }
+        }
+      }
+
+      // Линия предпросмотра при создании отрезка
+      if (uiState.activeTool === "segment" && uiState.segmentStartPointId !== null) {
+        const startPt = api.repo.findPoint(uiState.segmentStartPointId);
+        if (startPt) {
+          const s1 = worldToScreen(startPt.x, startPt.y);
+          const s2 = worldToScreen(uiState.mouseWorld.x, uiState.mouseWorld.y);
+          ctx.save();
+          ctx.setLineDash([6, 4]);
+          ctx.strokeStyle = "#38bdf8";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(s1.x, s1.y);
+          ctx.lineTo(s2.x, s2.y);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      // Отрисовка отрезков (SegmentFigure)
+      for (const seg of state.segments) {
+        if (!seg.p1_ref || !seg.p2_ref) continue;
+        const s1 = worldToScreen(seg.p1_ref.x, seg.p1_ref.y);
+        const s2 = worldToScreen(seg.p2_ref.x, seg.p2_ref.y);
+        const isSelected = uiState.selectedSegmentIds.includes(seg.id);
+        const isHovered = uiState.hoveredSegmentId === seg.id;
+
+        if (isSelected || isHovered) {
+          ctx.strokeStyle = isSelected ? "rgba(56, 189, 248, 0.35)" : "rgba(148, 163, 184, 0.25)";
+          ctx.lineWidth = 9;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(s1.x, s1.y);
+          ctx.lineTo(s2.x, s2.y);
+          ctx.stroke();
+        }
+
+        ctx.strokeStyle = isSelected ? "#38bdf8" : (isHovered ? "#93c5fd" : "#e2e8f0");
+        ctx.lineWidth = isSelected ? 3.2 : 2.4;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(s1.x, s1.y);
+        ctx.lineTo(s2.x, s2.y);
+        ctx.stroke();
+
+        // Подпись отрезка и значки ограничений возле середины отрезка
+        const mx = (s1.x + s2.x) / 2;
+        const my = (s1.y + s2.y) / 2;
+        ctx.fillStyle = isSelected ? "#38bdf8" : "#94a3b8";
+        ctx.font = "600 11px 'Inter', sans-serif";
+        ctx.fillText(seg.label, mx + 6, my - 6);
+
+        // Иконки ограничений на этом отрезке
+        const segBadges = [];
+        for (const r of state.restrictions) {
+          if (r.seg_ids.includes(seg.id)) {
+            if (r.type === "HORIZONTAL") segBadges.push({ text: "H", color: "#10b981" });
+            if (r.type === "VERTICAL") segBadges.push({ text: "V", color: "#10b981" });
+            if (r.type === "PARALLEL") segBadges.push({ text: "∥", color: "#818cf8" });
+            if (r.type === "PERPENDICULAR") segBadges.push({ text: "⊥", color: "#c084fc" });
+          } else if (r.type === "HORIZONTAL" && r.p_ids[0] === seg.p1_id && r.p_ids[1] === seg.p2_id) {
+            segBadges.push({ text: "H", color: "#10b981" });
+          } else if (r.type === "VERTICAL" && r.p_ids[0] === seg.p1_id && r.p_ids[1] === seg.p2_id) {
+            segBadges.push({ text: "V", color: "#10b981" });
+          }
+        }
+        segBadges.forEach((b, idx) => {
+          drawCanvasBadge(mx - 10 + idx * 18, my + 14, b.text, b.color);
+        });
+      }
+
+      // Отрисовка точек (PointFigure)
+      for (const pt of state.points) {
+        const sp = worldToScreen(pt.x, pt.y);
+        const isSelected = uiState.selectedPointIds.includes(pt.id);
+        const isHovered = uiState.hoveredPointId === pt.id;
+        const isFixed = state.restrictions.some(r => r.type === "FIX_POINT" && r.p_ids[0] === pt.id);
+        const isCoincident = state.restrictions.some(r => r.type === "COINCIDENT" && r.p_ids.includes(pt.id));
+        const isOnLine = state.restrictions.some(r => r.type === "POINT_ON_LINE" && r.p_ids[0] === pt.id);
+
+        if (isSelected || isHovered) {
+          ctx.fillStyle = isSelected ? "rgba(56, 189, 248, 0.3)" : "rgba(148, 163, 184, 0.25)";
+          ctx.beginPath();
+          ctx.arc(sp.x, sp.y, 11, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        if (isCoincident) {
+          ctx.strokeStyle = "#fbbf24";
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.arc(sp.x, sp.y, 8.5, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        ctx.fillStyle = isFixed ? "#f43f5e" : (isSelected ? "#38bdf8" : "#f8fafc");
+        ctx.strokeStyle = "#0f172a";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sp.x, sp.y, 5.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // Метка точки P_i
+        ctx.fillStyle = isSelected ? "#38bdf8" : "#cbd5e1";
+        ctx.font = "600 11px 'JetBrains Mono', monospace";
+        ctx.fillText(`${pt.label}(${pt.x.toFixed(0)},${pt.y.toFixed(0)})`, sp.x + 8, sp.y - 8);
+
+        if (isFixed) {
+          drawCanvasBadge(sp.x - 14, sp.y + 14, "🔒", "#f43f5e");
+        }
+        if (isOnLine) {
+          drawCanvasBadge(sp.x + 8, sp.y + 14, "∈", "#22d3ee");
+        }
+      }
+    }
+
+    function drawCanvasBadge(x, y, text, borderColor) {
+      ctx.save();
+      ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = 1.2;
+      const w = 16, h = 16;
+      ctx.beginPath();
+      ctx.roundRect(x - w / 2, y - h / 2, w, h, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#f8fafc";
+      ctx.font = "bold 10px 'JetBrains Mono', monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, x, y + 0.5);
+      ctx.restore();
+    }
+
+    function drawDistanceDimension(p1, p2, dVal) {
+      const s1 = worldToScreen(p1.x, p1.y);
+      const s2 = worldToScreen(p2.x, p2.y);
+      const dx = s2.x - s1.x;
+      const dy = s2.y - s1.y;
+      const len = Math.hypot(dx, dy);
+      if (len < 12) return;
+
+      const nx = -dy / len;
+      const ny = dx / len;
+      const offset = 24;
+
+      const d1x = s1.x + nx * offset;
+      const d1y = s1.y + ny * offset;
+      const d2x = s2.x + nx * offset;
+      const d2y = s2.y + ny * offset;
+
+      ctx.save();
+      // Выносные линии
+      ctx.strokeStyle = "rgba(56, 189, 248, 0.45)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(s1.x, s1.y); ctx.lineTo(d1x + nx * 4, d1y + ny * 4);
+      ctx.moveTo(s2.x, s2.y); ctx.lineTo(d2x + nx * 4, d2y + ny * 4);
+      ctx.stroke();
+
+      // Размерная линия
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(d1x, d1y);
+      ctx.lineTo(d2x, d2y);
+      ctx.stroke();
+
+      // Плашка с числом d
+      const mx = (d1x + d2x) / 2;
+      const my = (d1y + d2y) / 2;
+      const label = `d = ${Number(dVal).toFixed(1)}`;
+      ctx.font = "600 10px 'JetBrains Mono', monospace";
+      const tw = ctx.measureText(label).width + 10;
+      ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+      ctx.strokeStyle = "#0284c7";
+      ctx.beginPath();
+      ctx.roundRect(mx - tw / 2, my - 9, tw, 18, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#7dd3fc";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, mx, my);
+      ctx.restore();
+    }
+
+    function drawAngleAnnotation(p1, p2, p3, p4, angleDeg) {
+      const s1 = worldToScreen(p1.x, p1.y);
+      const s2 = worldToScreen(p2.x, p2.y);
+      const s3 = worldToScreen(p3.x, p3.y);
+      const s4 = worldToScreen(p4.x, p4.y);
+
+      const mx = (s1.x + s2.x + s3.x + s4.x) / 4;
+      const my = (s1.y + s2.y + s3.y + s4.y) / 4;
+
+      ctx.save();
+      const label = `∠ ${Number(angleDeg).toFixed(1)}°`;
+      ctx.font = "600 10px 'JetBrains Mono', monospace";
+      const tw = ctx.measureText(label).width + 10;
+      ctx.fillStyle = "rgba(15, 23, 42, 0.92)";
+      ctx.strokeStyle = "#ec4899";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.roundRect(mx - tw / 2, my - 9, tw, 18, 4);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#f472b6";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, mx, my);
+      ctx.restore();
+    }
+
+    // =========================================================================
+    // 5. ОБНОВЛЕНИЕ БРАУЗЕРА ОГРАНИЧЕНИЙ, СТАТУСА И ТАБЛИЦЫ МАТРИЦЫ ЯКОБИ
+    // =========================================================================
+    function renderAll() {
+      renderCanvas();
+      updateHeaderStatus();
+      renderRestrictionsBrowser();
+      renderPrimitivesBrowser();
+      updateJsonPanel();
+      renderMatrixInspector();
+      updateSelectionBadge();
+    }
+
+    function updateHeaderStatus() {
+      const state = api.getAllPrimitives();
+      const { dof, totalVars, totalEqs } = state.dofInfo;
+      const res = state.solver;
+
+      document.getElementById("dofValue").textContent = dof;
+      document.getElementById("iterValue").textContent = res.iterations || 0;
+      document.getElementById("residualValue").textContent = (res.max_residual || 0).toExponential(2);
+      document.getElementById("slaeDimBadge").textContent = `${totalEqs + totalVars} × ${totalEqs + totalVars} (m=${totalEqs}, n=${totalVars})`;
+
+      const eqBadge = document.getElementById("equilibriumBadge");
+      if (res.converged || state.restrictions.length === 0) {
+        eqBadge.textContent = "Равновесное";
+        eqBadge.className = "font-semibold text-emerald-400";
+      } else {
+        eqBadge.textContent = "Неравновесное (Конфликт)";
+        eqBadge.className = "font-semibold text-rose-400";
+      }
+
+      const defBadge = document.getElementById("modelDefBadge");
+      if (state.points.length === 0) {
+        defBadge.textContent = "(Пустой эскиз)";
+      } else if (dof === 0) {
+        defBadge.textContent = "(Полностью определена)";
+      } else if (dof > 0) {
+        defBadge.textContent = `(Недоопределена: своб. ${dof})`;
+      } else {
+        defBadge.textContent = `(Переопределена: избыт. ${-dof})`;
+      }
+
+      document.getElementById("countRestrictions").textContent = state.restrictions.length;
+      document.getElementById("countPrimitives").textContent = state.points.length + state.segments.length;
+    }
+
+    function describeRestrictionTargets(r) {
+      const pLabels = r.p_ids.map(pid => api.repo.findPoint(pid)?.label || `P${pid}`);
+      const sLabels = r.seg_ids.map(sid => api.repo.findSegment(sid)?.label || `L${sid}`);
+      if (r.type === "COINCIDENT" || r.type === "DISTANCE") {
+        return sLabels.length ? `${sLabels[0]} (${pLabels.join(" – ")})` : pLabels.join(" ↔ ");
+      }
+      if (r.type === "PARALLEL" || r.type === "PERPENDICULAR" || r.type === "ANGLE") {
+        return sLabels.length >= 2 ? `${sLabels[0]}, ${sLabels[1]}` : pLabels.join(", ");
+      }
+      if (r.type === "VERTICAL" || r.type === "HORIZONTAL") {
+        return sLabels.length ? `${sLabels[0]} (${pLabels.join("–")})` : pLabels.join("–");
+      }
+      if (r.type === "POINT_ON_LINE") {
+        return `${pLabels[0]} ∈ ${sLabels[0] || (pLabels[1] + "–" + pLabels[2])}`;
+      }
+      if (r.type === "FIX_POINT") {
+        return `${pLabels[0]} (${r.value.toFixed(1)}, ${r.value2.toFixed(1)})`;
+      }
+      return pLabels.join(", ");
+    }
+
+    function renderRestrictionsBrowser() {
+      const listEl = document.getElementById("restrictionsList");
+      const restrictions = api.repo.restrictions;
+      if (restrictions.length === 0) {
+        listEl.innerHTML = `
+          <div class="p-4 rounded-lg bg-slate-950/60 border border-slate-800/80 text-center text-xs text-slate-400">
+            На эскиз пока не наложены геометрические ограничения.<br/>
+            Выберите примитивы на холсте или нажмите любую из 9 кнопок ограничений слева.
+          </div>`;
+        return;
+      }
+
+      listEl.innerHTML = "";
+      for (const r of restrictions) {
+        const meta = RestrictionMeta[r.type];
+        const card = document.createElement("div");
+        card.className = "p-2.5 rounded-lg bg-slate-950/90 border border-slate-800 hover:border-slate-700 flex flex-col gap-1.5 text-xs";
+
+        const topRow = document.createElement("div");
+        topRow.className = "flex items-center justify-between gap-2";
+        topRow.innerHTML = `
+          <div class="flex items-center gap-2">
+            <span class="w-5 h-5 rounded bg-teal-500/15 border border-teal-500/30 text-teal-300 flex items-center justify-center font-bold mono text-[11px]">${meta.badge}</span>
+            <span class="font-semibold text-slate-100">${meta.name}</span>
+          </div>
+          <button data-remove-restriction="${r.id}" class="px-1.5 py-0.5 rounded bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 text-[11px] transition" title="Снять ограничение">
+            Снять ✕
+          </button>
+        `;
+        card.appendChild(topRow);
+
+        const targetRow = document.createElement("div");
+        targetRow.className = "flex items-center justify-between text-[11px] text-slate-400";
+        const resVal = Number(r.residual || 0);
+        const resColor = resVal < 1e-3 ? "text-emerald-400" : "text-rose-400";
+        targetRow.innerHTML = `
+          <span>Объекты: <strong class="text-slate-200 mono">${describeRestrictionTargets(r)}</strong></span>
+          <span class="mono ${resColor}">|f|=${resVal.toExponential(1)}</span>
+        `;
+        card.appendChild(targetRow);
+
+        // Редактируемые параметры прямо в браузере ограничений
+        if (r.type === "DISTANCE" || r.type === "ANGLE") {
+          const editRow = document.createElement("div");
+          editRow.className = "flex items-center gap-2 mt-0.5 pt-1.5 border-t border-slate-800/80";
+          const unit = r.type === "DISTANCE" ? "мм (d)" : "град (α°)";
+          editRow.innerHTML = `
+            <span class="text-[11px] text-slate-400">Параметр ${unit}:</span>
+            <input type="number" step="any" value="${Number(r.value.toFixed(2))}" data-edit-restriction="${r.id}" class="w-24 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-sky-300 mono text-xs focus:outline-none focus:border-teal-400" />
+          `;
+          card.appendChild(editRow);
+        } else if (r.type === "FIX_POINT") {
+          const editRow = document.createElement("div");
+          editRow.className = "flex items-center gap-1.5 mt-0.5 pt-1.5 border-t border-slate-800/80 text-[11px]";
+          editRow.innerHTML = `
+            <span class="text-slate-400">x_c:</span>
+            <input type="number" step="any" value="${Number(r.value.toFixed(1))}" data-edit-fix-x="${r.id}" class="w-16 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-rose-300 mono text-xs" />
+            <span class="text-slate-400">y_c:</span>
+            <input type="number" step="any" value="${Number(r.value2.toFixed(1))}" data-edit-fix-y="${r.id}" class="w-16 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-rose-300 mono text-xs" />
+          `;
+          card.appendChild(editRow);
+        }
+
+        listEl.appendChild(card);
+      }
+    }
+
+    function renderPrimitivesBrowser() {
+      const listEl = document.getElementById("primitivesList");
+      const pts = api.repo.points;
+      const segs = api.repo.segments;
+      if (pts.length === 0 && segs.length === 0) {
+        listEl.innerHTML = `<div class="p-4 rounded-lg bg-slate-950/60 border border-slate-800 text-center text-xs text-slate-400">Эскиз пуст. Создайте точки или отрезки.</div>`;
+        return;
+      }
+
+      let html = "";
+      for (const p of pts) {
+        html += `
+          <div class="p-2 rounded-lg bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-2 text-xs">
+            <div class="flex items-center gap-2">
+              <span class="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 mono font-bold">${p.label}</span>
+              <span class="mono text-[11px] text-slate-300">(${p.x.toFixed(1)}, ${p.y.toFixed(1)})</span>
+            </div>
+            <button data-remove-primitive="${p.id}" class="px-1.5 py-0.5 rounded bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 text-[11px]">Удалить</button>
+          </div>`;
+      }
+      for (const s of segs) {
+        const len = (s.p1_ref && s.p2_ref) ? Math.hypot(s.p2_ref.x - s.p1_ref.x, s.p2_ref.y - s.p1_ref.y) : 0;
+        const p1Label = s.p1_ref ? s.p1_ref.label : `P${s.p1_id}`;
+        const p2Label = s.p2_ref ? s.p2_ref.label : `P${s.p2_id}`;
+        html += `
+          <div class="p-2 rounded-lg bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-2 text-xs">
+            <div>
+              <span class="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 mono font-bold mr-1.5">${s.label}</span>
+              <span class="mono text-[11px] text-slate-300">${p1Label}–${p2Label} (L=${len.toFixed(1)} мм)</span>
+            </div>
+            <button data-remove-primitive="${s.id}" class="px-1.5 py-0.5 rounded bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 text-[11px]">Удалить</button>
+          </div>`;
+      }
+      listEl.innerHTML = html;
+    }
+
+    function updateJsonPanel() {
+      const area = document.getElementById("jsonSerializerArea");
+      if (document.activeElement !== area) {
+        area.value = api.repo.serializeToJson();
+      }
+    }
+
+    function renderMatrixInspector() {
+      const state = api.getAllPrimitives();
+      const { totalVars, totalEqs } = state.dofInfo;
+      document.getElementById("matrixStatsPill").textContent =
+        `n = ${totalVars} параметров (${state.points.length} точек), m = ${totalEqs} уравнений ограничений`;
+
+      const eqContainer = document.getElementById("analyticalEquationsTable");
+      const details = state.solver.eq_details || [];
+      if (details.length === 0) {
+        eqContainer.innerHTML = `<div class="text-xs text-slate-400 p-3">Нет активных уравнений ограничений. Добавьте ограничения на рабочем поле.</div>`;
+      } else {
+        let rowsHtml = "";
+        for (const item of details) {
+          const meta = RestrictionMeta[item.restriction.type];
+          rowsHtml += `
+            <tr class="border-b border-slate-800/80">
+              <td class="py-2 px-3 mono text-amber-300 font-semibold">f_${item.eqIndex}</td>
+              <td class="py-2 px-3 text-slate-200 font-medium">${meta.name} (${describeRestrictionTargets(item.restriction)})</td>
+              <td class="py-2 px-3 mono text-slate-300">${meta.formula}</td>
+              <td class="py-2 px-3 mono text-teal-300">${item.symbolic}</td>
+              <td class="py-2 px-3 mono text-right ${Math.abs(item.f_val) < 1e-3 ? 'text-emerald-400' : 'text-rose-400'}">${item.f_val.toExponential(2)}</td>
+            </tr>`;
+        }
+        eqContainer.innerHTML = `
+          <table class="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr class="border-b border-slate-700 text-slate-400 bg-slate-950/60">
+                <th class="py-2 px-3">Ур.</th>
+                <th class="py-2 px-3">Ограничение</th>
+                <th class="py-2 px-3">Аналитическое уравнение f_j = 0</th>
+                <th class="py-2 px-3">Аналитические частные производные ∂f_j/∂Δp_i</th>
+                <th class="py-2 px-3 text-right">Невязка f_j</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>`;
+      }
+
+      // Отрисовка матрицы СЛАУ A и правой части b
+      const matContainer = document.getElementById("jacobianMatrixContainer");
+      const A = state.solver.last_jacobian || [];
+      const b = state.solver.last_rhs || [];
+      if (A.length === 0) {
+        matContainer.innerHTML = `<div class="text-xs text-slate-400 p-3">Матрица СЛАУ пуста (нет активных ограничений).</div>`;
+        return;
+      }
+
+      const colLabels = [];
+      for (const pt of state.points) {
+        colLabels.push(`Δx(${pt.label})`);
+        colLabels.push(`Δy(${pt.label})`);
+      }
+      for (let j = 1; j <= totalEqs; j++) {
+        colLabels.push(`λ_${j}`);
+      }
+
+      let thead = `<th class="py-1.5 px-2 bg-slate-950 border border-slate-800 text-slate-400">Строка (Ур.)</th>`;
+      for (const lbl of colLabels) {
+        thead += `<th class="py-1.5 px-2 bg-slate-950 border border-slate-800 text-sky-300 text-right">${lbl}</th>`;
+      }
+      thead += `<th class="py-1.5 px-2 bg-slate-950 border border-slate-800 text-amber-300 text-right">Правая часть b</th>`;
+
+      let tbody = "";
+      for (let r = 0; r < A.length; r++) {
+        const rowLabel = r < totalEqs ? `∂F/∂λ_${r + 1}` : `∂F/∂${colLabels[r - totalEqs]}`;
+        tbody += `<tr><td class="py-1 px-2 border border-slate-800 font-semibold text-slate-300 bg-slate-950/50">${rowLabel}</td>`;
+        for (let c = 0; c < A[r].length; c++) {
+          const val = A[r][c];
+          const isNonZero = Math.abs(val) > 1e-8;
+          const cellClass = isNonZero ? "text-emerald-300 font-semibold bg-emerald-950/20" : "text-slate-600";
+          tbody += `<td class="py-1 px-2 border border-slate-800 text-right ${cellClass}">${isNonZero ? val.toFixed(2) : "0"}</td>`;
+        }
+        const bVal = b[r] || 0;
+        tbody += `<td class="py-1 px-2 border border-slate-800 text-right text-amber-300 font-semibold bg-amber-950/15">${bVal.toFixed(2)}</td></tr>`;
+      }
+
+      matContainer.innerHTML = `
+        <table class="w-full border-collapse text-[11px] mono">
+          <thead><tr>${thead}</tr></thead>
+          <tbody>${tbody}</tbody>
+        </table>`;
+    }
+
+    function updateSelectionBadge() {
+      const badge = document.getElementById("selectionSummaryBadge");
+      const pLabels = uiState.selectedPointIds.map(id => api.repo.findPoint(id)?.label || `P${id}`);
+      const sLabels = uiState.selectedSegmentIds.map(id => api.repo.findSegment(id)?.label || `L${id}`);
+      const all = [...pLabels, ...sLabels];
+      badge.textContent = all.length ? `Выделено: ${all.join(", ")}` : "Выделено: нет (клик по точке/отрезку)";
+    }
+
+    // =========================================================================
+    // 6. ЛОГИКА ИНСТРУМЕНТОВ И НАЛОЖЕНИЯ 9 ОГРАНИЧЕНИЙ (Tool_1 & Pointer Usecases)
+    // =========================================================================
+    function setActiveTool(toolName) {
+      uiState.activeTool = toolName;
+      uiState.activeConstraintTool = null;
+      uiState.segmentStartPointId = null;
+
+      document.querySelectorAll(".tool-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.tool === toolName);
+      });
+      document.querySelectorAll(".constraint-btn").forEach(btn => btn.classList.remove("active"));
+
+      const badge = document.getElementById("modePromptBadge");
+      const hint = document.getElementById("modeHintText");
+      if (toolName === "select") {
+        badge.textContent = "Режим: Курсор (Pointer Usecase)";
+        hint.textContent = "Перетаскивайте точки или отрезки мышью — решатель пересчитывает эскиз в реальном времени.";
+      } else if (toolName === "point") {
+        badge.textContent = "Режим: Создание точки";
+        hint.textContent = "Кликните в любом месте рабочего поля для добавления новой точки P(x, y).";
+      } else if (toolName === "segment") {
+        badge.textContent = "Режим: Создание отрезка";
+        hint.textContent = "Кликните по начальной и конечной точкам (или в пустое место для автоматического создания точек).";
+      } else if (toolName === "delete") {
+        badge.textContent = "Режим: Удаление объектов";
+        hint.textContent = "Кликните по любой точке или отрезку для удаления примитива и связанных с ним ограничений.";
+      }
+      renderAll();
+    }
+
+    function openParamModal({ title, desc, label1, default1, label2 = null, default2 = 0 }, onConfirm) {
+      const modal = document.getElementById("paramModal");
+      document.getElementById("paramModalTitle").textContent = title;
+      document.getElementById("paramModalDesc").textContent = desc;
+      document.getElementById("paramInput1Label").textContent = label1;
+      const in1 = document.getElementById("paramInput1");
+      in1.value = Number(default1).toFixed(1);
+
+      const wrap2 = document.getElementById("paramInput2Wrapper");
+      const in2 = document.getElementById("paramInput2");
+      if (label2) {
+        wrap2.classList.remove("hidden");
+        document.getElementById("paramInput2Label").textContent = label2;
+        in2.value = Number(default2).toFixed(1);
+      } else {
+        wrap2.classList.add("hidden");
+      }
+
+      uiState.pendingModalCallback = () => {
+        const v1 = parseFloat(in1.value);
+        const v2 = parseFloat(in2.value);
+        if (Number.isNaN(v1)) return;
+        modal.classList.add("hidden");
+        onConfirm(v1, Number.isNaN(v2) ? 0 : v2);
+      };
+
+      modal.classList.remove("hidden");
+      in1.focus();
+      in1.select();
+    }
+
+    function tryApplyConstraintFromSelection(type) {
+      const pts = uiState.selectedPointIds.slice();
+      const segs = uiState.selectedSegmentIds.slice();
+
+      if (type === "COINCIDENT" && pts.length >= 2) {
+        api.repo.addRestriction("COINCIDENT", [pts[0], pts[1]], []);
+        api.solveSketch();
+        uiState.selectedPointIds = [];
+        uiState.activeConstraintTool = null;
+        document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+        showToast("Наложено ограничение: Совпадение двух точек");
+        renderAll();
+        return true;
+      }
+
+      if (type === "DISTANCE") {
+        let p1 = null, p2 = null, sId = [];
+        if (pts.length >= 2) {
+          p1 = api.repo.findPoint(pts[0]);
+          p2 = api.repo.findPoint(pts[1]);
+        } else if (segs.length >= 1) {
+          const seg = api.repo.findSegment(segs[0]);
+          if (seg) {
+            p1 = seg.p1_ref;
+            p2 = seg.p2_ref;
+            sId = [seg.id];
+          }
+        }
+        if (p1 && p2) {
+          const curDist = Math.max(10, Math.hypot(p2.x - p1.x, p2.y - p1.y));
+          openParamModal({
+            title: "Ограничение: Расстояние (d)",
+            desc: `Задайте расстояние между ${p1.label} и ${p2.label}:`,
+            label1: "Расстояние d (мм):",
+            default1: curDist
+          }, (val) => {
+            api.repo.addRestriction("DISTANCE", [p1.id, p2.id], sId, Math.max(1, val));
+            api.solveSketch();
+            uiState.selectedPointIds = [];
+            uiState.selectedSegmentIds = [];
+            uiState.activeConstraintTool = null;
+            document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+            showToast(`Наложено расстояние d = ${val.toFixed(1)} мм`);
+            renderAll();
+          });
+          return true;
+        }
+      }
+
+      if ((type === "PARALLEL" || type === "PERPENDICULAR") && segs.length >= 2) {
+        const s1 = api.repo.findSegment(segs[0]);
+        const s2 = api.repo.findSegment(segs[1]);
+        if (s1 && s2) {
+          api.repo.addRestriction(type, [s1.p1_id, s1.p2_id, s2.p1_id, s2.p2_id], [s1.id, s2.id]);
+          api.solveSketch();
+          uiState.selectedSegmentIds = [];
+          uiState.activeConstraintTool = null;
+          document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+          showToast(`Наложено ограничение: ${RestrictionMeta[type].name}`);
+          renderAll();
+          return true;
+        }
+      }
+
+      if (type === "VERTICAL" || type === "HORIZONTAL") {
+        let pIds = null, sIds = [];
+        if (segs.length >= 1) {
+          const s = api.repo.findSegment(segs[0]);
+          if (s) { pIds = [s.p1_id, s.p2_id]; sIds = [s.id]; }
+        } else if (pts.length >= 2) {
+          pIds = [pts[0], pts[1]];
+        }
+        if (pIds) {
+          api.repo.addRestriction(type, pIds, sIds);
+          api.solveSketch();
+          uiState.selectedPointIds = [];
+          uiState.selectedSegmentIds = [];
+          uiState.activeConstraintTool = null;
+          document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+          showToast(`Наложено ограничение: ${RestrictionMeta[type].name}`);
+          renderAll();
+          return true;
+        }
+      }
+
+      if (type === "ANGLE" && segs.length >= 2) {
+        const s1 = api.repo.findSegment(segs[0]);
+        const s2 = api.repo.findSegment(segs[1]);
+        if (s1 && s2 && s1.p1_ref && s1.p2_ref && s2.p1_ref && s2.p2_ref) {
+          const ux = s1.p2_ref.x - s1.p1_ref.x, uy = s1.p2_ref.y - s1.p1_ref.y;
+          const vx = s2.p2_ref.x - s2.p1_ref.x, vy = s2.p2_ref.y - s2.p1_ref.y;
+          const dot = ux * vx + uy * vy;
+          const l1 = Math.max(1e-9, Math.hypot(ux, uy)), l2 = Math.max(1e-9, Math.hypot(vx, vy));
+          const curAngle = Math.acos(Math.max(-1, Math.min(1, dot / (l1 * l2)))) * 180 / Math.PI;
+          openParamModal({
+            title: "Ограничение: Угол между отрезками (α°)",
+            desc: `Задайте угол между отрезками ${s1.label} и ${s2.label}:`,
+            label1: "Угол α (в градусах):",
+            default1: curAngle || 60
+          }, (val) => {
+            api.repo.addRestriction("ANGLE", [s1.p1_id, s1.p2_id, s2.p1_id, s2.p2_id], [s1.id, s2.id], val);
+            api.solveSketch();
+            uiState.selectedSegmentIds = [];
+            uiState.activeConstraintTool = null;
+            document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+            showToast(`Наложен угол α = ${val.toFixed(1)}°`);
+            renderAll();
+          });
+          return true;
+        }
+      }
+
+      if (type === "POINT_ON_LINE" && pts.length >= 1 && segs.length >= 1) {
+        const pt = api.repo.findPoint(pts[0]);
+        const seg = api.repo.findSegment(segs[0]);
+        if (pt && seg) {
+          api.repo.addRestriction("POINT_ON_LINE", [pt.id, seg.p1_id, seg.p2_id], [seg.id]);
+          api.solveSketch();
+          uiState.selectedPointIds = [];
+          uiState.selectedSegmentIds = [];
+          uiState.activeConstraintTool = null;
+          document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+          showToast(`Наложено ограничение: ${pt.label} принадлежит прямой ${seg.label}`);
+          renderAll();
+          return true;
+        }
+      }
+
+      if (type === "FIX_POINT" && pts.length >= 1) {
+        const pt = api.repo.findPoint(pts[0]);
+        if (pt) {
+          openParamModal({
+            title: `Фиксация точки ${pt.label}`,
+            desc: "Задайте координаты фиксации (x_c, y_c):",
+            label1: "Координата X (x_c, мм):",
+            default1: pt.x,
+            label2: "Координата Y (y_c, мм):",
+            default2: pt.y
+          }, (xc, yc) => {
+            api.repo.addRestriction("FIX_POINT", [pt.id], [], xc, yc);
+            api.solveSketch();
+            uiState.selectedPointIds = [];
+            uiState.activeConstraintTool = null;
+            document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+            showToast(`Точка ${pt.label} зафиксирована в (${xc.toFixed(1)}, ${yc.toFixed(1)})`);
+            renderAll();
+          });
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    function activateConstraintButton(type) {
+      // Если нужные объекты уже выделены — сразу применяем ограничение
+      if (tryApplyConstraintFromSelection(type)) return;
+
+      // Иначе включаем интерактивный режим пошагового выбора примитивов на холсте
+      uiState.activeConstraintTool = type;
+      uiState.selectedPointIds = [];
+      uiState.selectedSegmentIds = [];
+
+      document.querySelectorAll(".constraint-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.constraint === type);
+      });
+
+      const meta = RestrictionMeta[type];
+      document.getElementById("modePromptBadge").textContent = `Ограничение: ${meta.name}`;
+      const hints = {
+        COINCIDENT: "Кликните последовательно по 2 точкам на рабочем поле для их совмещения.",
+        DISTANCE: "Кликните по 1 отрезку или по 2 точкам для задания расстояния d.",
+        PARALLEL: "Кликните последовательно по 2 отрезкам для наложения параллельности.",
+        PERPENDICULAR: "Кликните последовательно по 2 отрезкам для наложения перпендикулярности.",
+        VERTICAL: "Кликните по 1 отрезку (или 2 точкам), чтобы сделать его вертикальным.",
+        HORIZONTAL: "Кликните по 1 отрезку (или 2 точкам), чтобы сделать его горизонтальным.",
+        ANGLE: "Кликните последовательно по 2 отрезкам для задания угла α° между ними.",
+        POINT_ON_LINE: "Кликните по 1 точке и по 1 отрезку (в любом порядке).",
+        FIX_POINT: "Кликните по точке, которую необходимо зафиксировать в пространстве."
+      };
+      document.getElementById("modeHintText").textContent = hints[type] || "";
+      renderAll();
+    }
+
+    // =========================================================================
+    // 7. ОБРАБОТЧИКИ СОБЫТИЙ МЫШИ НА ХОЛСТЕ (Pointer Usecase)
+    // =========================================================================
+    canvas.addEventListener("mousedown", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+
+      if (e.button === 1 || e.button === 2 || e.altKey) {
+        uiState.isPanning = true;
+        uiState.panLastScreen = { x: sx, y: sy };
+        return;
+      }
+
+      const world = screenToWorld(sx, sy);
+      const hitRadiusWorld = 11 / uiState.camera.scale;
+      const hitPt = HelperFunctions.queryPointAt(api.repo, world.x, world.y, hitRadiusWorld);
+      const hitSeg = !hitPt ? HelperFunctions.querySegmentAt(api.repo, world.x, world.y, 8 / uiState.camera.scale) : null;
+
+      // Если активен режим выбора объектов для наложения ограничения
+      if (uiState.activeConstraintTool) {
+        if (hitPt && !uiState.selectedPointIds.includes(hitPt.id)) {
+          uiState.selectedPointIds.push(hitPt.id);
+        } else if (hitSeg && !uiState.selectedSegmentIds.includes(hitSeg.id)) {
+          uiState.selectedSegmentIds.push(hitSeg.id);
+        }
+        tryApplyConstraintFromSelection(uiState.activeConstraintTool);
+        renderAll();
+        return;
+      }
+
+      if (uiState.activeTool === "point") {
+        api.repo.addPoint(world.x, world.y);
+        api.solveSketch();
+        renderAll();
+        return;
+      }
+
+      if (uiState.activeTool === "segment") {
+        let pt = hitPt;
+        if (!pt) {
+          pt = api.repo.addPoint(world.x, world.y);
+        }
+        if (uiState.segmentStartPointId === null) {
+          uiState.segmentStartPointId = pt.id;
+        } else if (uiState.segmentStartPointId !== pt.id) {
+          api.repo.addSegment(uiState.segmentStartPointId, pt.id);
+          uiState.segmentStartPointId = null;
+          api.solveSketch();
+        }
+        renderAll();
+        return;
+      }
+
+      if (uiState.activeTool === "delete") {
+        if (hitPt) {
+          api.repo.removePrimitive(hitPt.id);
+          api.solveSketch();
+        } else if (hitSeg) {
+          api.repo.removePrimitive(hitSeg.id);
+          api.solveSketch();
+        }
+        renderAll();
+        return;
+      }
+
+      // Режим select / drag (Pointer Usecase)
+      if (hitPt) {
+        if (e.shiftKey) {
+          const idx = uiState.selectedPointIds.indexOf(hitPt.id);
+          if (idx >= 0) uiState.selectedPointIds.splice(idx, 1);
+          else uiState.selectedPointIds.push(hitPt.id);
+        } else if (!uiState.selectedPointIds.includes(hitPt.id)) {
+          uiState.selectedPointIds = [hitPt.id];
+          if (!e.ctrlKey) uiState.selectedSegmentIds = [];
+        }
+        uiState.draggingPointId = hitPt.id;
+      } else if (hitSeg) {
+        if (e.shiftKey) {
+          const idx = uiState.selectedSegmentIds.indexOf(hitSeg.id);
+          if (idx >= 0) uiState.selectedSegmentIds.splice(idx, 1);
+          else uiState.selectedSegmentIds.push(hitSeg.id);
+        } else if (!uiState.selectedSegmentIds.includes(hitSeg.id)) {
+          uiState.selectedSegmentIds = [hitSeg.id];
+          if (!e.ctrlKey) uiState.selectedPointIds = [];
+        }
+        uiState.draggingSegmentId = hitSeg.id;
+        uiState.dragLastWorld = world;
+      } else {
+        if (!e.shiftKey) {
+          uiState.selectedPointIds = [];
+          uiState.selectedSegmentIds = [];
+        }
+        uiState.isPanning = true;
+        uiState.panLastScreen = { x: sx, y: sy };
+      }
+      renderAll();
+    });
+
+    canvas.addEventListener("mousemove", (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const world = screenToWorld(sx, sy);
+      uiState.mouseWorld = world;
+
+      document.getElementById("cursorX").textContent = world.x.toFixed(1);
+      document.getElementById("cursorY").textContent = world.y.toFixed(1);
+
+      if (uiState.isPanning) {
+        uiState.camera.x += sx - uiState.panLastScreen.x;
+        uiState.camera.y += sy - uiState.panLastScreen.y;
+        uiState.panLastScreen = { x: sx, y: sy };
+        renderCanvas();
+        return;
+      }
+
+      if (uiState.draggingPointId !== null) {
+        const pt = api.repo.findPoint(uiState.draggingPointId);
+        if (pt) {
+          pt.x = world.x;
+          pt.y = world.y;
+          api.solveSketch([pt.id]);
+          renderAll();
+        }
+        return;
+      }
+
+      if (uiState.draggingSegmentId !== null) {
+        const seg = api.repo.findSegment(uiState.draggingSegmentId);
+        if (seg && seg.p1_ref && seg.p2_ref) {
+          const dx = world.x - uiState.dragLastWorld.x;
+          const dy = world.y - uiState.dragLastWorld.y;
+          seg.p1_ref.x += dx;
+          seg.p1_ref.y += dy;
+          seg.p2_ref.x += dx;
+          seg.p2_ref.y += dy;
+          uiState.dragLastWorld = world;
+          api.solveSketch([seg.p1_id, seg.p2_id]);
+          renderAll();
+        }
+        return;
+      }
+
+      const hitPt = HelperFunctions.queryPointAt(api.repo, world.x, world.y, 11 / uiState.camera.scale);
+      const hitSeg = !hitPt ? HelperFunctions.querySegmentAt(api.repo, world.x, world.y, 8 / uiState.camera.scale) : null;
+      uiState.hoveredPointId = hitPt ? hitPt.id : null;
+      uiState.hoveredSegmentId = hitSeg ? hitSeg.id : null;
+      renderCanvas();
+    });
+
+    window.addEventListener("mouseup", () => {
+      uiState.draggingPointId = null;
+      uiState.draggingSegmentId = null;
+      uiState.isPanning = false;
+    });
+
+    canvas.addEventListener("contextmenu", e => e.preventDefault());
+
+    canvas.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.12 : 0.89;
+      uiState.camera.scale = Math.max(0.25, Math.min(8.0, uiState.camera.scale * factor));
+      document.getElementById("zoomLabel").textContent = `${Math.round((uiState.camera.scale / 1.8) * 100)}%`;
+      renderCanvas();
+    }, { passive: false });
+
+    // =========================================================================
+    // 8. ГОТОВЫЕ КОНТРОЛЬНЫЕ ПРИМЕРЫ (ДЕМО-ЭСКИЗЫ)
+    // =========================================================================
+    function loadPresetSlide30() {
+      // Точный пример со слайдов 16, 30-31 презентации РК6:
+      // Отрезок P1-P2 с фиксацией точки P1 и заданной длиной d = 120 мм
+      api.repo.clear();
+      const p1 = api.repo.addPoint(-60, -20, "P1");
+      const p2 = api.repo.addPoint(35, 35, "P2");
+      const s1 = api.repo.addSegment(p1.id, p2.id, "L1");
+      api.repo.addRestriction("FIX_POINT", [p1.id], [], -60, -20);
+      api.repo.addRestriction("DISTANCE", [p1.id, p2.id], [s1.id], 120);
+      api.solveSketch();
+      renderAll();
+      showToast("Загружен пример со слайда 30: Фиксация точки + Длина отрезка");
+    }
+
+    function loadPresetRectangle() {
+      // Параметрический прямоугольник 180 x 110 (слайд 12)
+      api.repo.clear();
+      const p1 = api.repo.addPoint(-90, -55, "P1");
+      const p2 = api.repo.addPoint(80, -40, "P2");
+      const p3 = api.repo.addPoint(95, 60, "P3");
+      const p4 = api.repo.addPoint(-85, 50, "P4");
+      const s1 = api.repo.addSegment(p1.id, p2.id, "L1");
+      const s2 = api.repo.addSegment(p2.id, p3.id, "L2");
+      const s3 = api.repo.addSegment(p4.id, p3.id, "L3");
+      const s4 = api.repo.addSegment(p1.id, p4.id, "L4");
+
+      api.repo.addRestriction("FIX_POINT", [p1.id], [], -90, -55);
+      api.repo.addRestriction("HORIZONTAL", [p1.id, p2.id], [s1.id]);
+      api.repo.addRestriction("VERTICAL", [p1.id, p4.id], [s4.id]);
+      api.repo.addRestriction("PARALLEL", [p1.id, p2.id, p4.id, p3.id], [s1.id, s3.id]);
+      api.repo.addRestriction("PERPENDICULAR", [p1.id, p2.id, p2.id, p3.id], [s1.id, s2.id]);
+      api.repo.addRestriction("DISTANCE", [p1.id, p2.id], [s1.id], 180);
+      api.repo.addRestriction("DISTANCE", [p2.id, p3.id], [s2.id], 110);
+      api.solveSketch();
+      renderAll();
+      showToast("Загружен параметрический прямоугольник 180×110 мм");
+    }
+
+    function loadPresetAll9Constraints() {
+      // Комплексный демо-стенд, демонстрирующий все 9 типов геометрических ограничений одновременно
+      api.repo.clear();
+      // Базовый прямоугольный контур + наклонная балка под углом 60° + совпадение узла + точка на прямой
+      const p1 = api.repo.addPoint(-120, -60, "P1");
+      const p2 = api.repo.addPoint(40, -60, "P2");
+      const p3 = api.repo.addPoint(40, 40, "P3");
+      const p4 = api.repo.addPoint(-120, 40, "P4");
+
+      // Узел P5 совпадает с P2 (COINCIDENT), от него идет луч P5-P6 под углом 60° к основанию P1-P2
+      const p5 = api.repo.addPoint(45, -55, "P5");
+      const p6 = api.repo.addPoint(110, 30, "P6");
+      // Точка P7 лежит на прямой луча P5-P6 (POINT_ON_LINE)
+      const p7 = api.repo.addPoint(75, -10, "P7");
+
+      const s1 = api.repo.addSegment(p1.id, p2.id, "L1");
+      const s2 = api.repo.addSegment(p2.id, p3.id, "L2");
+      const s3 = api.repo.addSegment(p4.id, p3.id, "L3");
+      const s4 = api.repo.addSegment(p1.id, p4.id, "L4");
+      const s5 = api.repo.addSegment(p5.id, p6.id, "L5");
+
+      // 9. Фиксация P1
+      api.repo.addRestriction("FIX_POINT", [p1.id], [], -120, -60);
+      // 6. Горизонтальность L1
+      api.repo.addRestriction("HORIZONTAL", [p1.id, p2.id], [s1.id]);
+      // 5. Вертикальность L4
+      api.repo.addRestriction("VERTICAL", [p1.id, p4.id], [s4.id]);
+      // 3. Параллельность L1 и L3
+      api.repo.addRestriction("PARALLEL", [p1.id, p2.id, p4.id, p3.id], [s1.id, s3.id]);
+      // 4. Перпендикулярность L1 и L2
+      api.repo.addRestriction("PERPENDICULAR", [p1.id, p2.id, p2.id, p3.id], [s1.id, s2.id]);
+      // 2. Расстояние L1 = 150, L2 = 95, L5 = 110
+      api.repo.addRestriction("DISTANCE", [p1.id, p2.id], [s1.id], 150);
+      api.repo.addRestriction("DISTANCE", [p2.id, p3.id], [s2.id], 95);
+      api.repo.addRestriction("DISTANCE", [p5.id, p6.id], [s5.id], 110);
+      // 1. Совпадение P2 и P5
+      api.repo.addRestriction("COINCIDENT", [p2.id, p5.id], []);
+      // 7. Угол между L1 и L5 = 60°
+      api.repo.addRestriction("ANGLE", [p1.id, p2.id, p5.id, p6.id], [s1.id, s5.id], 60);
+      // 8. Точка P7 принадлежит прямой L5
+      api.repo.addRestriction("POINT_ON_LINE", [p7.id, p5.id, p6.id], [s5.id]);
+
+      api.solveSketch();
+      renderAll();
+      showToast("Загружен демо-стенд со всеми 9 типами геометрических ограничений");
+    }
+
+    function loadPresetLinkage() {
+      // Шарнирный четырёхзвенник с 1 степенью свободы (можно вращать за P2 или P3!)
+      api.repo.clear();
+      const p1 = api.repo.addPoint(-100, -50, "P1");
+      const p2 = api.repo.addPoint(-70, 40, "P2");
+      const p3 = api.repo.addPoint(60, 65, "P3");
+      const p4 = api.repo.addPoint(90, -50, "P4");
+
+      const s1 = api.repo.addSegment(p1.id, p2.id, "L1");
+      const s2 = api.repo.addSegment(p2.id, p3.id, "L2");
+      const s3 = api.repo.addSegment(p4.id, p3.id, "L3");
+      const s4 = api.repo.addSegment(p1.id, p4.id, "L4");
+
+      api.repo.addRestriction("FIX_POINT", [p1.id], [], -100, -50);
+      api.repo.addRestriction("FIX_POINT", [p4.id], [], 90, -50);
+      api.repo.addRestriction("DISTANCE", [p1.id, p2.id], [s1.id], 95);
+      api.repo.addRestriction("DISTANCE", [p2.id, p3.id], [s2.id], 135);
+      api.repo.addRestriction("DISTANCE", [p4.id, p3.id], [s3.id], 120);
+
+      api.solveSketch();
+      renderAll();
+      showToast("Шарнирный четырёхзвенник (DOF=1): потяните точку P2 или P3 мышью!");
+    }
+
+    // =========================================================================
+    // 9. ПРИВЯЗКА ВСЕХ КНОПОК ИНТЕРФЕЙСА И ПРОСМОТРЩИКА C++ КОДА
+    // =========================================================================
+    document.querySelectorAll(".tool-btn").forEach(btn => {
+      btn.addEventListener("click", () => setActiveTool(btn.dataset.tool));
+    });
+
+    document.querySelectorAll(".constraint-btn").forEach(btn => {
+      btn.addEventListener("click", () => activateConstraintButton(btn.dataset.constraint));
+    });
+
+    document.getElementById("presetSlide30").addEventListener("click", loadPresetSlide30);
+    document.getElementById("presetRect").addEventListener("click", loadPresetRectangle);
+    document.getElementById("presetAll9").addEventListener("click", loadPresetAll9Constraints);
+    document.getElementById("presetLinkage").addEventListener("click", loadPresetLinkage);
+
+    document.getElementById("snapGridToggle").addEventListener("change", (e) => {
+      uiState.snapToGrid = e.target.checked;
+    });
+
+    document.getElementById("btnSolveNow").addEventListener("click", () => {
+      api.solveSketch();
+      renderAll();
+      showToast("СЛАУ решена, геометрия эскиза обновлена");
+    });
+
+    document.getElementById("btnResetView").addEventListener("click", () => {
+      uiState.camera = { x: 0, y: 0, scale: 1.8 };
+      document.getElementById("zoomLabel").textContent = "100%";
+      renderCanvas();
+    });
+
+    document.getElementById("btnClearCanvas").addEventListener("click", () => {
+      api.repo.clear();
+      uiState.selectedPointIds = [];
+      uiState.selectedSegmentIds = [];
+      api.solveSketch();
+      renderAll();
+      showToast("Рабочее поле очищено");
+    });
+
+    // Модальное окно ввода параметров
+    document.getElementById("paramModalCancel").addEventListener("click", () => {
+      document.getElementById("paramModal").classList.add("hidden");
+    });
+    document.getElementById("paramModalCloseBtn").addEventListener("click", () => {
+      document.getElementById("paramModal").classList.add("hidden");
+    });
+    document.getElementById("paramModalApplyBtn").addEventListener("click", () => {
+      if (uiState.pendingModalCallback) uiState.pendingModalCallback();
+    });
+    document.getElementById("paramInput1").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && uiState.pendingModalCallback) uiState.pendingModalCallback();
+    });
+
+    // Делегирование событий в браузере ограничений и примитивов
+    document.getElementById("restrictionsList").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-remove-restriction]");
+      if (btn) {
+        const rid = Number(btn.dataset.removeRestriction);
+        api.repo.removeRestriction(rid);
+        api.solveSketch();
+        renderAll();
+        showToast("Ограничение снято");
+      }
+    });
+
+    document.getElementById("restrictionsList").addEventListener("change", (e) => {
+      const inp = e.target.closest("[data-edit-restriction]");
+      if (inp) {
+        const rid = Number(inp.dataset.editRestriction);
+        const r = api.repo.restrictions.find(x => x.id === rid);
+        const val = parseFloat(inp.value);
+        if (r && !Number.isNaN(val)) {
+          r.value = r.type === "DISTANCE" ? Math.max(1, val) : val;
+          api.solveSketch();
+          renderAll();
+          showToast(`Параметр обновлен: ${r.value}`);
+        }
+      }
+      const fixX = e.target.closest("[data-edit-fix-x]");
+      if (fixX) {
+        const rid = Number(fixX.dataset.editFixX);
+        const r = api.repo.restrictions.find(x => x.id === rid);
+        const val = parseFloat(fixX.value);
+        if (r && !Number.isNaN(val)) {
+          r.value = val;
+          api.solveSketch();
+          renderAll();
+        }
+      }
+      const fixY = e.target.closest("[data-edit-fix-y]");
+      if (fixY) {
+        const rid = Number(fixY.dataset.editFixY);
+        const r = api.repo.restrictions.find(x => x.id === rid);
+        const val = parseFloat(fixY.value);
+        if (r && !Number.isNaN(val)) {
+          r.value2 = val;
+          api.solveSketch();
+          renderAll();
+        }
+      }
+    });
+
+    document.getElementById("primitivesList").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-remove-primitive]");
+      if (btn) {
+        const pid = Number(btn.dataset.removePrimitive);
+        api.repo.removePrimitive(pid);
+        api.solveSketch();
+        renderAll();
+        showToast("Примитив удален");
+      }
+    });
+
+    // Переключение правых вкладок (Ограничения / Примитивы / JSON)
+    function switchRightTab(tab) {
+      const rBtn = document.getElementById("rightTabRestrictions");
+      const pBtn = document.getElementById("rightTabPrimitives");
+      const jBtn = document.getElementById("rightTabJson");
+      const rPan = document.getElementById("panelRestrictions");
+      const pPan = document.getElementById("panelPrimitives");
+      const jPan = document.getElementById("panelJson");
+
+      rPan.classList.toggle("hidden", tab !== "restrictions");
+      pPan.classList.toggle("hidden", tab !== "primitives");
+      jPan.classList.toggle("hidden", tab !== "json");
+
+      rBtn.className = tab === "restrictions"
+        ? "flex-1 py-1.5 px-2 text-xs font-semibold rounded-t-md bg-slate-800 text-teal-300 border-b-2 border-teal-400"
+        : "flex-1 py-1.5 px-2 text-xs font-semibold rounded-t-md text-slate-400 hover:text-slate-200";
+      pBtn.className = tab === "primitives"
+        ? "flex-1 py-1.5 px-2 text-xs font-semibold rounded-t-md bg-slate-800 text-sky-300 border-b-2 border-sky-400"
+        : "flex-1 py-1.5 px-2 text-xs font-semibold rounded-t-md text-slate-400 hover:text-slate-200";
+      jBtn.className = tab === "json"
+        ? "py-1.5 px-2.5 text-xs font-semibold rounded-t-md bg-slate-800 text-purple-300 border-b-2 border-purple-400 mono"
+        : "py-1.5 px-2.5 text-xs font-semibold rounded-t-md text-slate-400 hover:text-slate-200 mono";
+    }
+
+    document.getElementById("rightTabRestrictions").addEventListener("click", () => switchRightTab("restrictions"));
+    document.getElementById("rightTabPrimitives").addEventListener("click", () => switchRightTab("primitives"));
+    document.getElementById("rightTabJson").addEventListener("click", () => switchRightTab("json"));
+
+    document.getElementById("btnCopyJson").addEventListener("click", () => {
+      const area = document.getElementById("jsonSerializerArea");
+      area.select();
+      document.execCommand("copy");
+      showToast("JSON-представление эскиза скопировано");
+    });
+
+    document.getElementById("btnLoadJson").addEventListener("click", () => {
+      try {
+        const area = document.getElementById("jsonSerializerArea");
+        api.repo.loadFromJson(area.value);
+        api.solveSketch();
+        renderAll();
+        showToast("Эскиз загружен из JSON");
+      } catch (err) {
+        showToast("Ошибка разбора JSON: " + err.message);
+      }
+    });
+
+    // Переключение главных вкладок (Рабочее поле / Матрица Якоби / Архитектура и C++)
+    function switchMainTab(tab) {
+      document.getElementById("viewEditor").classList.toggle("hidden", tab !== "editor");
+      document.getElementById("viewMatrix").classList.toggle("hidden", tab !== "matrix");
+      document.getElementById("viewArch").classList.toggle("hidden", tab !== "arch");
+
+      document.getElementById("tabBtnEditor").className = tab === "editor"
+        ? "px-3 py-1 rounded-md text-xs font-medium bg-blue-600 text-white transition"
+        : "px-3 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-white transition";
+      document.getElementById("tabBtnMatrix").className = tab === "matrix"
+        ? "px-3 py-1 rounded-md text-xs font-medium bg-blue-600 text-white transition"
+        : "px-3 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-white transition";
+      document.getElementById("tabBtnArch").className = tab === "arch"
+        ? "px-3 py-1 rounded-md text-xs font-medium bg-blue-600 text-white transition"
+        : "px-3 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-white transition";
+
+      if (tab === "editor") {
+        setTimeout(resizeCanvas, 20);
+      } else {
+        renderAll();
+      }
+    }
+
+    document.getElementById("tabBtnEditor").addEventListener("click", () => switchMainTab("editor"));
+    document.getElementById("tabBtnMatrix").addEventListener("click", () => switchMainTab("matrix"));
+    document.getElementById("tabBtnArch").addEventListener("click", () => switchMainTab("arch"));
+
+    // Заполнение селектора исходных файлов C++
+    const cppSelect = document.getElementById("cppFileSelect");
+    const cppViewer = document.getElementById("cppCodeViewer");
+    Object.keys(CPP_SOURCE_FILES).forEach(fname => {
+      const opt = document.createElement("option");
+      opt.value = fname;
+      opt.textContent = fname;
+      cppSelect.appendChild(opt);
+    });
+    cppSelect.addEventListener("change", () => {
+      cppViewer.textContent = CPP_SOURCE_FILES[cppSelect.value] || "";
+    });
+    cppViewer.textContent = CPP_SOURCE_FILES[cppSelect.value] || "";
+
+    document.getElementById("btnCopyCppCode").addEventListener("click", () => {
+      const tmp = document.createElement("textarea");
+      tmp.value = cppViewer.textContent;
+      document.body.appendChild(tmp);
+      tmp.select();
+      document.execCommand("copy");
+      document.body.removeChild(tmp);
+      showToast(`Файл ${cppSelect.value} скопирован в буфер обмена`);
+    });
+
+    // Инициализация при загрузке
+    window.addEventListener("load", async () => {
+      await initWasmCore();
+      resizeCanvas();
+      loadPresetAll9Constraints();
+    });
+  </script>
+</body>
+</html>
