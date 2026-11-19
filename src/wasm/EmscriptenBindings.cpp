@@ -103,5 +103,6 @@ EMSCRIPTEN_BINDINGS(editor_api) {
     function("movePoint", &api_move_point);
     function("moveSegment", +[](int id, double dx, double dy) { g_api.moveSegment(id, dx, dy); });
     function("solveSketch", +[]() { g_api.solveSketch(); });
+    function("setAutoSolve", +[](bool enabled) { g_api.setAutoSolve(enabled); });
     function("clearSketch", &api_clear);
 }

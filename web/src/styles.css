@@ -92,21 +92,23 @@ i[data-icon] { display: inline-flex; align-items: center; }
 .ribbon { display: flex; align-items: center; grid-column: 1/-1; gap: 0; padding: 6px 12px 5px; overflow-x: auto; background: #e7eaee; border-bottom: 1px solid #b3bbc4; }
 .bank { flex: none; border-right: 1px solid #bcc4cd; padding: 0 13px; }
 .bank:first-child { padding-left: 0; }
+.solver-bank { margin-left: auto; padding-right: 0; border-right: 0; }
 .bank > span { display: block; margin: 3px 3px 0; font-size: 10px; line-height: 13px; color: #59646f; }
 .commands { align-items: center; gap: 2px; }
-.commands button, .commands label, .solve {
+.commands button, .commands label {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 7px;
   border: 1px solid transparent; border-radius: 2px; color: #2f3d4c; font-size: 12px; white-space: nowrap; cursor: pointer;
 }
 .commands .icon { width: 19px; height: 19px; }
 .relations button { width: 31px; }
 .relations .icon { color: #285570; }
-.commands button:hover, .commands label:hover, .solve:hover { background: #f6f8fa; border-color: #afb9c4; }
+.commands button:hover, .commands label:hover { background: #f6f8fa; border-color: #afb9c4; }
 .commands button.active, .commands label:has(:checked) { background: #cbddec; border-color: #8aabc6; color: #154364; }
 .commands label { position: relative; }
 .commands label:has(:focus-visible) { outline: 2px solid #4487bc; }
 .commands input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-.solve { margin: 0 0 0 auto; flex: none; font-weight: 550; }
+.solver-bank input { position: static; width: 13px; height: 13px; opacity: 1; accent-color: #285570; }
+.solve { font-weight: 550; }
 .solve .icon { color: #346c59; }
 .navigator { min-height: 0; display: flex; flex-direction: column; border-right: 1px solid #aeb7c1; background: var(--panel); }
 .dock-heading, .document-bar { display: flex; flex: none; height: 38px; align-items: center; border-bottom: 1px solid var(--border); }
@@ -203,6 +205,7 @@ details:not([open]) > summary .icon { transform: rotate(-90deg); }
 .command-line strong { flex: none; font-weight: 600; color: white; }
 .statusbar { grid-column: 1/-1; display: flex; align-items: center; gap: 13px; padding: 0 12px; font-size: 10px; white-space: nowrap; background: #e7ebef; border-top: 1px solid #bdc5ce; }
 #equilibriumBadge { display: flex; align-items: center; gap: 5px; }
+#equilibriumBadge[data-state="paused"] { color: #725414; }
 .statusbar b { font: 500 10px var(--mono); }
 #selectionSummaryBadge { overflow: hidden; text-overflow: ellipsis; }
 .coordinates { margin-left: auto; font: 10px var(--mono); }
@@ -225,7 +228,7 @@ details:not([open]) > summary .icon { transform: rotate(-90deg); }
   .main-tabs i { display: none; }
   #wasmStatusBadge { font-size: 0; }
   .ribbon { padding: 4px 5px; }
-  .commands button, .commands label, .solve { height: 30px; font-size: 11px; }
+  .commands button, .commands label { height: 30px; font-size: 11px; }
   .workbench { grid-template: auto minmax(230px, 1.7fr) minmax(120px, 1fr) 25px / minmax(0,1fr); overflow-y: auto; }
   .drawing { grid-row: 2; }
   .navigator { grid-row: 3; position: relative; border: 0; overflow: auto; }

@@ -1,5 +1,7 @@
 #include "CoreAlgo.hpp"
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace cad {
@@ -58,122 +60,157 @@ std::vector<double> CoreAlgo::solve(SparseMatrix A, std::vector<double> b) {
     return x;
 }
 
+namespace {
+
+double maxAbs(const std::vector<double>& values) {
+    double result = 0.0;
+    for (double value : values) {
+        if (!std::isfinite(value)) return std::numeric_limits<double>::infinity();
+        result = std::max(result, std::fabs(value));
+    }
+    return result;
+}
+
+} // namespace
+
 OptimizeResult CoreAlgo::optimize(EvalCallback eval_f_df, const std::vector<double>& initial_params,
                                   int num_equations, int max_iterations, double eps,
-                                  const std::vector<double>& variable_weights) {
+                                  const std::vector<double>& variable_weights,
+                                  const std::vector<double>& reference_params) {
+    const auto& reference = reference_params.empty() ? initial_params : reference_params;
+    const int n = static_cast<int>(initial_params.size());
+    const int m = num_equations;
+    const int total_dim = m + n;
     OptimizeResult res;
-    res.final_params = initial_params;
-
-    int n = static_cast<int>(initial_params.size());
-    int m = num_equations;
     if (n == 0 || m == 0) {
+        res.final_params = reference;
         return res;
     }
 
-    std::vector<double> p = initial_params;
-    std::vector<double> lambda(m, 0.0);
-    int total_dim =
-        m + n; // первые m уравнений: dF/dlambda_j = 0, следующие n уравнений: dF/ddp_i = 0 (как на слайде 31)
+    const auto weight = [&](int i) { return variable_weights.empty() ? 1.0 : variable_weights[i]; };
+    const auto cost = [&](const std::vector<double>& params) {
+        double result = 0.0;
+        for (int i = 0; i < n; ++i) {
+            const double displacement = params[i] - reference[i];
+            result += 0.5 * weight(i) * displacement * displacement;
+        }
+        return result;
+    };
 
-    for (int iter = 0; iter < max_iterations; ++iter) {
+    constexpr double constraint_tolerance = 1e-3;
+    std::vector<double> p = initial_params;
+    std::vector<double> f;
+    SparseMatrix jacobian;
+    // Если цель уже допустима, значение штрафа в ней равно нулю.
+    if (reference != initial_params) {
+        eval_f_df(reference, f, jacobian);
+        if (maxAbs(f) < constraint_tolerance) p = reference;
+    }
+    if (p != reference || f.empty()) {
+        f.clear();
+        jacobian.clear();
+        eval_f_df(p, f, jacobian);
+    }
+
+    res.final_params = initial_params;
+    const double initial_cost =
+        maxAbs(f) < constraint_tolerance ? cost(p) : std::numeric_limits<double>::infinity();
+    double best_cost = std::numeric_limits<double>::infinity();
+    std::vector<double> penalty(m, 1.0);
+    for (int iter = 0;; ++iter) {
+        const double current_cost = cost(p);
+        const double max_residual = maxAbs(f);
+        if (max_residual < constraint_tolerance && current_cost < best_cost) {
+            best_cost = current_cost;
+            res.final_params = p;
+        }
+        if (iter >= max_iterations || !std::isfinite(current_cost) || !std::isfinite(max_residual)) break;
         res.iterations = iter + 1;
 
-        std::vector<double> f_vec;
-        SparseMatrix J_f;
-        eval_f_df(p, f_vec, J_f);
-
-        double max_f = 0.0;
-        for (int j = 0; j < m; ++j) {
-            if (std::fabs(f_vec[j]) > max_f) max_f = std::fabs(f_vec[j]);
-        }
-        res.max_residual = max_f;
-
-        if (max_f < eps && iter > 0) {
-            res.converged = true;
-            break;
-        }
-
-        // Формируем матрицу Якоби A размера (m + n) x (m + n) и правую часть b для системы (**) со слайда 31:
-        // Неизвестные СЛАУ: z = [dp_1, ..., dp_n, lambda_1, ..., lambda_m]^T
-        // Уравнения 0..m-1 (dF/dlambda_j = 0):
-        //   sum_i (df_j / d(dp_i)) * dp_i + 0 * lambda = -f_j(p)
-        // Уравнения m..m+n-1 (dF/d(dp_i) = 0):
-        //   w_i * dp_i + sum_j (df_j / d(dp_i)) * lambda_j = 0
+        // Ищем поправку d к текущим координатам p. Штраф за итоговое смещение
+        // вычисляется в p + d относительно одной и той же опорной геометрии.
         SparseMatrix A(total_dim);
         std::vector<double> b(total_dim, 0.0);
-
-        // Верхний блок (m строк): уравнения ограничений dF/dlambda_j = f_j(p + dp) = 0
         for (int j = 0; j < m; ++j) {
-            for (const auto& [i, value] : J_f[j]) {
+            for (const auto& [i, value] : jacobian[j]) {
                 A[j].emplace(i, value);
                 A[m + i].emplace(n + j, value);
             }
-            // Слабая регуляризация диагонали множителей Лагранжа для устойчивости при зависимых ограничениях
+            // Регуляризация множителей для зависимых уравнений ограничений.
             A[j][n + j] = -1e-9;
-            b[j] = -f_vec[j];
+            b[j] = -f[j];
         }
-
-        // Нижний блок (n строк): уравнения стационарности Лагранжиана dF/ddp_i = dp_i + sum_j lambda_j *
-        // df_j/ddp_i = 0
         for (int i = 0; i < n; ++i) {
-            A[m + i][i] = variable_weights.empty() ? 1.0 : variable_weights[i];
+            A[m + i][i] = weight(i);
+            b[m + i] = -weight(i) * (p[i] - reference[i]);
         }
 
         if (iter == 0) {
             res.last_jacobian = A;
             res.last_rhs = b;
         }
+        const auto step = solve(std::move(A), b);
+        if (!std::isfinite(maxAbs(step))) break;
+        if (iter == 0) res.last_solution = step;
 
-        // Решаем СЛАУ собственным методом Гаусса CoreAlgo::solve(A, b)
-        std::vector<double> sol = CoreAlgo::solve(std::move(A), std::move(b));
-        if (iter == 0) res.last_solution = sol;
-
-        // Ограничение максимального шага (damping) для глобальной сходимости сильно нелинейных ограничений
-        double max_dp = 0.0;
+        double max_delta = 0.0;
+        double cost_slope = 0.0;
         for (int i = 0; i < n; ++i) {
-            if (std::fabs(sol[i]) > max_dp) max_dp = std::fabs(sol[i]);
+            max_delta = std::max(max_delta, std::fabs(step[i]));
+            cost_slope -= b[m + i] * step[i];
         }
+        if (max_delta < eps) break;
 
-        double step_scale = 1.0;
-        const double max_allowed_step = 80.0;
-        if (max_dp > max_allowed_step) {
-            step_scale = max_allowed_step / max_dp;
-        }
-
-        // Применяем приращения к варьируемым параметрам p (слайд 32)
-        double norm_inf = 0.0;
-        for (int i = 0; i < n; ++i) {
-            double dp_i = sol[i] * step_scale;
-            p[i] += dp_i;
-            if (std::fabs(dp_i) > norm_inf) norm_inf = std::fabs(dp_i);
-        }
+        // Штраф за невязку используется только для выбора длины шага.
+        // У каждого уравнения свой вес, поскольку невязки измеряются в разных единицах.
+        double merit_slope = cost_slope;
         for (int j = 0; j < m; ++j) {
-            lambda[j] = sol[n + j];
+            penalty[j] = std::max(penalty[j], 1.0 + 2.0 * std::fabs(step[n + j]));
+            double linearized_residual = f[j];
+            for (const auto& [i, value] : jacobian[j]) {
+                linearized_residual += value * step[i];
+            }
+            merit_slope += penalty[j] * (std::fabs(linearized_residual) - std::fabs(f[j]));
         }
+        if (!(merit_slope < 0.0) || !std::isfinite(merit_slope)) break;
 
-        res.max_delta = norm_inf;
-        res.lagrange_multipliers = lambda;
-
-        // Проверка условия окончания итерационного процесса ||dp||_inf < eps
-        if (norm_inf < eps && max_f < eps * 10.0) {
-            res.converged = true;
-            break;
+        std::vector<double> trial(n);
+        std::vector<double> trial_f;
+        SparseMatrix trial_jacobian;
+        constexpr double max_step = 80.0;
+        double scale = std::min(1.0, max_step / max_delta);
+        constexpr int max_backtracks = 20;
+        bool accepted = false;
+        for (int backtrack = 0; backtrack < max_backtracks && scale * max_delta >= eps;
+             ++backtrack, scale *= 0.5) {
+            for (int i = 0; i < n; ++i) {
+                trial[i] = p[i] + scale * step[i];
+            }
+            if (!std::isfinite(maxAbs(trial))) continue;
+            trial_f.clear();
+            trial_jacobian.clear();
+            eval_f_df(trial, trial_f, trial_jacobian);
+            double merit_change = cost(trial) - current_cost;
+            for (int j = 0; j < m; ++j) {
+                merit_change += penalty[j] * (std::fabs(trial_f[j]) - std::fabs(f[j]));
+            }
+            accepted = std::isfinite(merit_change) && merit_change <= 1e-4 * scale * merit_slope;
+            if (accepted) break;
         }
+        if (!accepted) break;
+
+        p.swap(trial);
+        f.swap(trial_f);
+        jacobian.swap(trial_jacobian);
+        res.max_delta = scale * max_delta;
+        res.lagrange_multipliers.assign(step.begin() + n, step.end());
     }
 
-    // Финальная проверка невязки
-    std::vector<double> f_final;
-    SparseMatrix J_final;
-    eval_f_df(p, f_final, J_final);
-    double max_f_final = 0.0;
-    for (double val : f_final) {
-        if (std::fabs(val) > max_f_final) max_f_final = std::fabs(val);
-    }
-    res.max_residual = max_f_final;
-    res.converged = (max_f_final < 1e-3);
-    res.final_params = p;
-    res.final_residuals = std::move(f_final);
-    res.final_gradients = std::move(J_final);
+    // При остановке внутри допустимой области используем последний результат уточнения.
+    if (maxAbs(f) < constraint_tolerance && cost(p) <= initial_cost) res.final_params = std::move(p);
+    eval_f_df(res.final_params, res.final_residuals, res.final_gradients);
+    res.max_residual = maxAbs(res.final_residuals);
+    res.converged = res.max_residual < constraint_tolerance;
     return res;
 }
 

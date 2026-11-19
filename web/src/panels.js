@@ -19,6 +19,7 @@ function variableTex(index) {
 
 function renderGradient(row) {
   if (!row.df_row.length) return mathMarkup("0");
+  if (row.df_row.some(([, value]) => !Number.isFinite(value))) return "—";
   const terms = row.df_row.map(([index, value]) => mathMarkup(
     "\\frac{\\partial f_{" + row.eqIndex + "}}{\\partial (" + variableTex(index) + ")}="
     + numberTex(value, 3)
@@ -48,15 +49,21 @@ function updateHeaderStatus() {
   const { dof, totalVars, totalEqs } = state.dofInfo;
   const res = state.solver;
 
+  document.getElementById("autoSolveToggle").checked = res.auto_solve;
   document.getElementById("dofValue").textContent = dof;
-  document.getElementById("iterValue").textContent = res.iterations || 0;
-  document.getElementById("residualValue").innerHTML = mathMarkup(numberTex(res.max_residual || 0, 2));
+  document.getElementById("iterValue").textContent = res.current ? res.iterations : "—";
+  document.getElementById("residualValue").innerHTML = res.current && Number.isFinite(res.max_residual)
+    ? mathMarkup(numberTex(res.max_residual, 2))
+    : "—";
   const dimension = res.last_jacobian.length;
   document.getElementById("slaeDimBadge").innerHTML =
-    `${dimension} × ${dimension} ${mathMarkup(`(m=${totalEqs},\\; n=${totalVars})`)}`;
+    res.current ? `${dimension} × ${dimension} ${mathMarkup(`(m=${totalEqs},\\; n=${totalVars})`)}` : "—";
 
   const eqBadge = document.getElementById("equilibriumBadge");
-  if (res.converged || state.restrictions.length === 0) {
+  if (!res.auto_solve) {
+    eqBadge.textContent = "Автопересчёт выключен";
+    eqBadge.dataset.state = "paused";
+  } else if (res.converged || state.restrictions.length === 0) {
     eqBadge.textContent = "Равновесие";
     eqBadge.dataset.state = "ready";
   } else {
@@ -143,7 +150,8 @@ function renderRestrictionsBrowser() {
       } else if (r.type === "FIX_POINT") {
         inputs = field("X, мм", "edit-fix-x", r.value) + field("Y, мм", "edit-fix-y", r.value2);
       }
-      detail = `<div class="restriction-detail">${inputs}<footer><span>Невязка ${mathMarkup(numberTex(r.residual, 2))}</span>
+      const residual = r.residual === null ? "—" : mathMarkup(numberTex(r.residual, 2));
+      detail = `<div class="restriction-detail">${inputs}<footer><span>Невязка ${residual}</span>
         <button data-remove-restriction="${r.id}">Снять связь</button></footer></div>`;
     }
     return `<div class="restriction-row${selected ? " selected" : ""}"><button class="restriction-select" data-select-restriction="${r.id}" aria-expanded="${selected}">
@@ -179,12 +187,18 @@ function updateJsonPanel() {
 function renderMatrixInspector() {
   const state = api.getAllPrimitives();
   const { totalVars, totalEqs } = state.dofInfo;
-  const { variableLabels, eq_details: details, last_jacobian: A, last_rhs: b } = state.solver;
-  const merged = state.points.length * 2 - totalVars;
+  const { current, variableLabels, eq_details: details, last_jacobian: A, last_rhs: b } = state.solver;
+  const merged = current ? state.points.length * 2 - totalVars : 0;
   document.getElementById("matrixStatsPill").innerHTML =
     `${mathMarkup(`n=${totalVars},\\; m=${totalEqs}`)}${merged ? ` · Объединено координат: ${merged}` : ""}`;
 
   const eqContainer = document.getElementById("analyticalEquationsTable");
+  const matContainer = document.getElementById("jacobianMatrixContainer");
+  if (!current) {
+    eqContainer.innerHTML = '<div class="text-xs text-slate-400 p-3">После последней правки нужен пересчёт.</div>';
+    matContainer.innerHTML = '<div class="text-xs text-slate-400 p-3">Нажмите «Пересчитать» во вкладке «Эскиз».</div>';
+    return;
+  }
   if (details.length === 0) {
     eqContainer.innerHTML = `<div class="text-xs text-slate-400 p-3">Нет активных уравнений системы Лагранжа.</div>`;
   } else {
@@ -197,7 +211,7 @@ function renderMatrixInspector() {
           <td class="py-2 px-3 text-slate-200 font-medium">${meta.name} (${escapeHtml(describeRestrictionTargets(item.restriction))})</td>
           <td class="py-2 px-3 text-slate-200">${mathMarkup(item.tex)}</td>
           <td class="py-2 px-3 text-teal-200">${renderGradient(item)}</td>
-          <td class="py-2 px-3 text-right ${Math.abs(item.f_val) < 1e-3 ? 'text-emerald-400' : 'text-rose-400'}">${mathMarkup(numberTex(item.f_val, 2))}</td>
+          <td class="py-2 px-3 text-right ${Number.isFinite(item.f_val) && Math.abs(item.f_val) < 1e-3 ? 'text-emerald-400' : 'text-rose-400'}">${Number.isFinite(item.f_val) ? mathMarkup(numberTex(item.f_val, 2)) : "—"}</td>
         </tr>`;
     }
     eqContainer.innerHTML = `
@@ -216,7 +230,6 @@ function renderMatrixInspector() {
   }
 
   // Отрисовка матрицы СЛАУ A и правой части b
-  const matContainer = document.getElementById("jacobianMatrixContainer");
   if (A.length === 0) {
     matContainer.innerHTML = `<div class="text-xs text-slate-400 p-3">Для текущих ограничений решать СЛАУ не требуется.</div>`;
     return;
@@ -242,13 +255,14 @@ function renderMatrixInspector() {
     const rowLabel = mathMarkup(`\\partial F/\\partial ${variable}`);
     tbody += `<tr><td class="py-1 px-2 border border-slate-800 text-slate-300 bg-slate-950/50">${rowLabel}</td>`;
     for (let c = 0; c < A.length; c++) {
-      const val = row.get(c) ?? 0;
+      const val = row.has(c) ? row.get(c) : 0;
       const isNonZero = Math.abs(val) > 1e-8;
       const cellClass = isNonZero ? "text-emerald-300 font-semibold bg-emerald-950/20" : "text-slate-600";
-      tbody += `<td class="py-1 px-2 border border-slate-800 text-right ${cellClass}">${isNonZero ? val.toFixed(2) : "0"}</td>`;
+      const coefficient = val === null ? "—" : isNonZero ? val.toFixed(2) : "0";
+      tbody += `<td class="py-1 px-2 border border-slate-800 text-right ${cellClass}">${coefficient}</td>`;
     }
-    const bVal = b[r] || 0;
-    tbody += `<td class="py-1 px-2 border border-slate-800 text-right text-amber-300 font-semibold bg-amber-950/15">${bVal.toFixed(2)}</td></tr>`;
+    const bVal = Number.isFinite(b[r]) ? b[r].toFixed(2) : "—";
+    tbody += `<td class="py-1 px-2 border border-slate-800 text-right text-amber-300 font-semibold bg-amber-950/15">${bVal}</td></tr>`;
   }
 
   matContainer.innerHTML = `

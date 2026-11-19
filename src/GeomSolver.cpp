@@ -1,17 +1,23 @@
 #include "GeomSolver.hpp"
 #include "HelperFunctions.hpp"
+#include <cmath>
 #include <iterator>
 #include <unordered_map>
-#include <unordered_set>
 
 namespace cad {
 
 OptimizeResult GeomSolver::solve(GeomRepository& repo, const std::vector<Restriction>& extra_restrictions,
-                                 const std::vector<int>& dragged_point_ids) {
+                                 const std::vector<PointMoveTarget>& move_targets) {
     const auto groups = HelperFunctions::groupCoincidentPoints(repo, extra_restrictions);
-    const std::unordered_set<int> dragged(dragged_point_ids.begin(), dragged_point_ids.end());
+    std::unordered_map<int, const PointMoveTarget*> targets_by_id;
+    for (const auto& target : move_targets) {
+        if (std::isfinite(target.x) && std::isfinite(target.y)) {
+            targets_by_id.emplace(target.point_id, &target);
+        }
+    }
     std::unordered_map<int, int> pointIdToVarIdx;
     std::vector<double> initial_params;
+    std::vector<double> reference_params;
     std::vector<double> variable_weights;
     std::vector<std::vector<int>> point_groups;
 
@@ -27,14 +33,16 @@ OptimizeResult GeomSolver::solve(GeomRepository& repo, const std::vector<Restric
             ++count;
             x += point->x / count - x / count;
             y += point->y / count - y / count;
-            if (dragged.count(point->id)) {
+            const auto target = targets_by_id.find(point->id);
+            if (target != targets_by_id.end()) {
                 ++drag_count;
-                drag_x += point->x / drag_count - drag_x / drag_count;
-                drag_y += point->y / drag_count - drag_y / drag_count;
+                drag_x += target->second->x / drag_count - drag_x / drag_count;
+                drag_y += target->second->y / drag_count - drag_y / drag_count;
             }
         }
         // При перетаскивании всей группы следует за курсором её перемещаемая точка.
-        initial_params.insert(initial_params.end(), {drag_count ? drag_x : x, drag_count ? drag_y : y});
+        initial_params.insert(initial_params.end(), {x, y});
+        reference_params.insert(reference_params.end(), {drag_count ? drag_x : x, drag_count ? drag_y : y});
         const double weight = count + 24.0 * drag_count;
         variable_weights.insert(variable_weights.end(), {weight, weight});
     }
@@ -67,9 +75,11 @@ OptimizeResult GeomSolver::solve(GeomRepository& repo, const std::vector<Restric
         }
     };
 
-    auto result = CoreAlgo::optimize(evaluate, initial_params, total_eqs, 60, 1e-6, variable_weights);
+    auto result =
+        CoreAlgo::optimize(evaluate, initial_params, total_eqs, 60, 1e-6, variable_weights, reference_params);
     result.point_groups = std::move(point_groups);
-    // Даже без уравнений Лагранжа совпадение должно обновить координаты всех точек группы.
+    if (!result.converged) return result;
+
     for (auto& point : repo.points) {
         const int i = pointIdToVarIdx.at(point->id);
         point->x = result.final_params[i];

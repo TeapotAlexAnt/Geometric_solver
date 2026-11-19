@@ -39,10 +39,17 @@ export function bindControls() {
     uiState.snapToGrid = e.target.checked;
   });
 
+  document.getElementById("autoSolveToggle").addEventListener("change", (e) => {
+    api.setAutoSolve(e.target.checked);
+    renderAll();
+  });
+
   document.getElementById("btnSolveNow").addEventListener("click", () => {
     api.solveSketch();
     renderAll();
-    showToast("СЛАУ решена, геометрия эскиза обновлена");
+    showToast(api.getAllPrimitives().solver.converged
+      ? "СЛАУ решена"
+      : "Не удалось удовлетворить ограничения");
   });
 
   document.getElementById("btnResetView").addEventListener("click", fitSketch);

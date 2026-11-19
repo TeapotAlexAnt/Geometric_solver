@@ -5,6 +5,8 @@
 
 namespace cad {
 
+struct PointMoveTarget;
+
 /**
  * Render Usecase, Tool_1 Usecase, Pointer Usecase и API Handler
  * (соответствуют одноименным блокам на схеме бригады).
@@ -13,6 +15,11 @@ class ApiHandler {
   private:
     GeomRepository repo;
     OptimizeResult last_solve_result;
+    bool auto_solve_enabled = true;
+    bool solve_result_current = true;
+
+    void refreshSketch();
+    void solveWithTargets(const std::vector<PointMoveTarget>& targets);
 
   public:
     GeomRepository& getRepository();
@@ -39,6 +46,8 @@ class ApiHandler {
     bool updateRestriction(int id, double value, double value2);
 
     void solveSketch();
+
+    void setAutoSolve(bool enabled);
 
     void clearSketch();
 

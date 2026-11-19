@@ -180,6 +180,78 @@ int main() {
         assert(api.queryBox(10, 0, 0, 10) == std::vector<int>({point, inner, through, tangent}));
     }
 
+    // Принадлежность прямой с тремя свободными точками даёт ортогональную проекцию
+    // исходных точек на итоговую прямую.
+    {
+        ApiHandler api;
+        const int a = api.createPoint(0, 0), b = api.createPoint(10, 0), p = api.createPoint(3, 20);
+        api.applyRestriction(static_cast<int>(RestrictionType::POINT_ON_LINE), {p, a, b}, {}, 0);
+        const auto& repo = api.getRepository();
+        const auto* pa = repo.findPoint(a);
+        const auto* pb = repo.findPoint(b);
+        const auto* pp = repo.findPoint(p);
+        const double dx = pb->x - pa->x, dy = pb->y - pa->y;
+        assert(std::hypot(dx, dy) > 1);
+        assert(api.getLastSolveResult().max_residual < 1e-6);
+        assert(std::fabs(pa->x * dx + pa->y * dy) < 1e-5);
+        assert(std::fabs((pb->x - 10) * dx + pb->y * dy) < 1e-5);
+        assert(std::fabs((pp->x - 3) * dx + (pp->y - 20) * dy) < 1e-5);
+    }
+
+    // Цель около центра окружности не должна менять направление радиуса скачком.
+    {
+        ApiHandler api;
+        const int a = api.createPoint(0, 0), b = api.createPoint(100, 0);
+        api.applyRestriction(static_cast<int>(RestrictionType::FIX_POINT), {a}, {}, 0);
+        api.applyRestriction(static_cast<int>(RestrictionType::DISTANCE), {a, b}, {}, 100);
+        const auto* point = api.getRepository().findPoint(b);
+        api.movePoint(b, 0, 1e-9);
+        assert(std::hypot(point->x - 100, point->y) < 1e-5);
+
+        api.movePoint(b, 120, 120);
+        const double diagonal = 100 / std::sqrt(2.0);
+        assert(std::hypot(point->x - diagonal, point->y - diagonal) < 1e-4);
+        const double last_x = point->x, last_y = point->y;
+        api.applyRestriction(static_cast<int>(RestrictionType::FIX_POINT), {b}, {}, 200, 200);
+        assert(!api.getLastSolveResult().converged);
+        assert(point->x == last_x && point->y == last_y);
+    }
+
+    // Пауза допускает независимое движение даже совпадающих и фиксированных точек.
+    {
+        ApiHandler api;
+        const int pin_id = api.createPoint(0, 0);
+        const int segment_id = api.createSegmentAt(0, 0, 10, 0, pin_id);
+        const auto& repo = api.getRepository();
+        const auto* pin = repo.findPoint(pin_id);
+        const auto* segment = repo.findSegment(segment_id);
+        const auto* start = segment->p1_ref;
+        const auto* end = segment->p2_ref;
+        api.applyRestriction(static_cast<int>(RestrictionType::FIX_POINT), {pin_id}, {}, 0);
+        const int length = api.applyRestriction(static_cast<int>(RestrictionType::DISTANCE),
+                                                {start->id, end->id}, {segment_id}, 10);
+
+        api.setAutoSolve(false);
+        api.movePoint(pin_id, 25, 7);
+        assert(pin->x == 25 && pin->y == 7 && start->x == 0 && start->y == 0);
+        api.moveSegment(segment_id, 4, 3);
+        const bool updated = api.updateRestriction(length, 12, 0);
+        assert(updated && repo.restrictions.size() == 3);
+        assert(start->x == 4 && start->y == 3 && end->x == 14 && end->y == 3);
+        assert(api.getLastSolveResult().last_jacobian.empty());
+
+        api.solveSketch();
+        assert(api.getLastSolveResult().converged);
+        assert(pin->x == start->x && pin->y == start->y && std::hypot(pin->x, pin->y) < 1e-6);
+        assert(std::fabs(std::hypot(end->x - start->x, end->y - start->y) - 12) < 1e-6);
+
+        api.movePoint(start->id, 3, 4);
+        assert(start->x == 3 && start->y == 4 && std::hypot(pin->x, pin->y) < 1e-6);
+        api.setAutoSolve(true);
+        assert(api.getLastSolveResult().converged);
+        assert(pin->x == start->x && pin->y == start->y && std::hypot(pin->x, pin->y) < 1e-6);
+    }
+
     std::cout << "=== Все 9 ограничений и СЛАУ успешно прошли проверку! ===" << std::endl;
     return 0;
 }

@@ -28,11 +28,12 @@ function getAllPrimitives() {
   }));
 
   const details = [];
-  const { final_residuals: residuals, final_gradients: gradients } = state.solver;
+  const { current, final_residuals: residuals, final_gradients: gradients } = state.solver;
   const restrictions = state.restrictions.map(item => {
     const { equations } = RestrictionMeta[item.type];
     const row = details.length;
-    const residual = Math.max(...residuals.slice(row, row + equations.length).map(Math.abs), 0);
+    const values = residuals.slice(row, row + equations.length);
+    const residual = current && values.every(Number.isFinite) ? Math.max(...values.map(Math.abs), 0) : null;
     const restriction = { ...item, residual };
     for (const tex of equations) {
       const index = details.length;
@@ -83,6 +84,7 @@ export const api = {
   updateRestriction: (id, value, value2) => update("updateRestriction", id, value, value2),
   removeRestriction: id => update("removeRestriction", id),
   solveSketch: () => update("solveSketch"),
+  setAutoSolve: enabled => update("setAutoSolve", enabled),
   clearSketch: () => update("clearSketch"),
   serializeSketch: () => backend.serializeSketch(),
   loadSketch(data) {

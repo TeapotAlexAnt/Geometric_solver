@@ -12,11 +12,20 @@ namespace cad {
 
 namespace {
 
+void writeValue(std::ostream& out, int value) { out << value; }
+
+void writeValue(std::ostream& out, double value) {
+    if (std::isfinite(value))
+        out << value;
+    else
+        out << "null";
+}
+
 template <typename T> void writeArray(std::ostream& out, const std::vector<T>& values) {
     out << '[';
     for (size_t i = 0; i < values.size(); ++i) {
         if (i) out << ',';
-        out << values[i];
+        writeValue(out, values[i]);
     }
     out << ']';
 }
@@ -39,7 +48,9 @@ void writeArray(std::ostream& out, const SparseMatrix& rows) {
         for (const auto& [column, value] : rows[i]) {
             if (!first) out << ',';
             first = false;
-            out << '[' << column << ',' << value << ']';
+            out << '[' << column << ',';
+            writeValue(out, value);
+            out << ']';
         }
         out << ']';
     }
@@ -51,19 +62,24 @@ void writeArray(std::ostream& out, const SparseMatrix& rows) {
 GeomRepository& ApiHandler::getRepository() { return repo; }
 
 std::string ApiHandler::getAllPrimitives() const {
-    const auto total_vars = static_cast<int>(last_solve_result.final_params.size());
-    const auto total_eqs = static_cast<int>(last_solve_result.final_residuals.size());
+    const int total_vars = solve_result_current
+                               ? static_cast<int>(last_solve_result.final_params.size())
+                               : static_cast<int>(HelperFunctions::groupCoincidentPoints(repo).size()) * 2;
+    const int total_eqs = solve_result_current ? static_cast<int>(last_solve_result.final_residuals.size())
+                                               : HelperFunctions::countEquations(repo);
     const int dof = total_vars - total_eqs;
     std::ostringstream ss;
     ss << std::setprecision(std::numeric_limits<double>::max_digits10);
     ss << '{';
     repo.writeJsonFields(ss);
     ss << ",\"solver\":{"
-       << "\"converged\":" << (last_solve_result.converged ? "true" : "false")
+       << "\"auto_solve\":" << (auto_solve_enabled ? "true" : "false")
+       << ",\"current\":" << (solve_result_current ? "true" : "false")
+       << ",\"converged\":" << (solve_result_current && last_solve_result.converged ? "true" : "false")
        << ",\"iterations\":" << last_solve_result.iterations
-       << ",\"max_delta\":" << last_solve_result.max_delta
-       << ",\"max_residual\":" << last_solve_result.max_residual << ",\"dof\":" << dof
-       << ",\"point_groups\":";
+       << ",\"max_delta\":" << last_solve_result.max_delta << ",\"max_residual\":";
+    writeValue(ss, last_solve_result.max_residual);
+    ss << ",\"dof\":" << dof << ",\"point_groups\":";
     writeArray(ss, last_solve_result.point_groups);
     ss << ",\"last_jacobian\":";
     writeArray(ss, last_solve_result.last_jacobian);
@@ -84,20 +100,20 @@ int ApiHandler::createPoint(double x, double y, const std::string& label) {
     if (!std::isfinite(x) || !std::isfinite(y)) return -1;
     auto pt = repo.addPoint(x, y, label);
     if (!pt) return -1;
-    solveSketch();
+    refreshSketch();
     return pt->id;
 }
 
 int ApiHandler::createSegment(int p1_id, int p2_id, const std::string& label) {
     auto seg = repo.addSegment(p1_id, p2_id, label);
-    if (seg) solveSketch();
+    if (seg) refreshSketch();
     return seg ? seg->id : -1;
 }
 
 int ApiHandler::createSegmentAt(double x1, double y1, double x2, double y2, int snap_start, int snap_end,
                                 const std::string& label) {
     const auto segment = repo.addSegment(x1, y1, x2, y2, label, snap_start, snap_end);
-    if (segment) solveSketch();
+    if (segment) refreshSketch();
     return segment ? segment->id : -1;
 }
 
@@ -108,7 +124,7 @@ bool ApiHandler::deletePrimitives(const std::vector<int>& ids) {
     for (const int id : ids) {
         if (repo.removePrimitive(id)) changed = true;
     }
-    if (changed) solveSketch();
+    if (changed) refreshSketch();
     return changed;
 }
 
@@ -123,13 +139,13 @@ int ApiHandler::applyRestriction(int type_code, const std::vector<int>& p_ids,
     r.value2 = val2;
     if (!repo.isValidRestriction(r)) return -1;
     int rid = repo.addRestriction(r);
-    if (rid > 0) solveSketch();
+    if (rid > 0) refreshSketch();
     return rid;
 }
 
 bool ApiHandler::removeRestriction(int rid) {
     bool ok = repo.removeRestriction(rid);
-    if (ok) last_solve_result = GeomSolver::solve(repo);
+    if (ok) refreshSketch();
     return ok;
 }
 
@@ -140,21 +156,44 @@ bool ApiHandler::updateRestriction(int id, double value, double value2) {
     if (it == repo.restrictions.end()) return false;
     it->value = value;
     it->value2 = value2;
-    solveSketch();
+    refreshSketch();
     return true;
 }
 
-void ApiHandler::solveSketch() { last_solve_result = GeomSolver::solve(repo); }
+void ApiHandler::solveSketch() { solveWithTargets({}); }
+
+void ApiHandler::setAutoSolve(bool enabled) {
+    if (auto_solve_enabled == enabled) return;
+    auto_solve_enabled = enabled;
+    if (enabled) solveSketch();
+}
+
+void ApiHandler::refreshSketch() {
+    if (auto_solve_enabled) {
+        solveSketch();
+    } else if (solve_result_current) {
+        last_solve_result = {};
+        solve_result_current = false;
+    }
+}
+
+void ApiHandler::solveWithTargets(const std::vector<PointMoveTarget>& targets) {
+    last_solve_result = GeomSolver::solve(repo, {}, targets);
+    solve_result_current = true;
+}
 
 void ApiHandler::clearSketch() {
     repo.clear();
-    solveSketch();
+    refreshSketch();
 }
 
 void ApiHandler::replaceSketch(GeomRepository replacement) {
-    OptimizeResult result = GeomSolver::solve(replacement);
+    if (auto_solve_enabled) {
+        last_solve_result = GeomSolver::solve(replacement);
+        solve_result_current = true;
+    }
     repo = std::move(replacement);
-    last_solve_result = std::move(result);
+    if (!auto_solve_enabled) refreshSketch();
 }
 
 int ApiHandler::queryPoint(double x, double y, double radius, const std::vector<int>& excluded_ids) const {
@@ -170,24 +209,32 @@ std::vector<int> ApiHandler::queryBox(double x1, double y1, double x2, double y2
 }
 
 void ApiHandler::movePoint(int point_id, double target_x, double target_y) {
-    PointFigure* pt = repo.findPoint(point_id);
-    if (!pt || !std::isfinite(target_x) || !std::isfinite(target_y)) return;
-    pt->x = target_x;
-    pt->y = target_y;
-    // При перетаскивании точки задаем её начальное приближение в точке курсора,
-    // а принцип наименьших изменений Лагранжиана (слайд 27) автоматически удерживает её
-    // максимально близко к курсору при соблюдении всех наложенных ограничений!
-    last_solve_result = GeomSolver::solve(repo, {}, {point_id});
+    auto* point = repo.findPoint(point_id);
+    if (!point || !std::isfinite(target_x) || !std::isfinite(target_y)) return;
+    if (auto_solve_enabled) {
+        solveWithTargets({{point_id, target_x, target_y}});
+    } else {
+        point->x = target_x;
+        point->y = target_y;
+        refreshSketch();
+    }
 }
 
 void ApiHandler::moveSegment(int segment_id, double dx, double dy) {
-    SegmentFigure* seg = repo.findSegment(segment_id);
+    const SegmentFigure* seg = repo.findSegment(segment_id);
     if (!seg || !std::isfinite(dx) || !std::isfinite(dy)) return;
-    seg->p1_ref->x += dx;
-    seg->p1_ref->y += dy;
-    seg->p2_ref->x += dx;
-    seg->p2_ref->y += dy;
-    last_solve_result = GeomSolver::solve(repo, {}, {seg->p1_id, seg->p2_id});
+    const double x1 = seg->p1_ref->x + dx, y1 = seg->p1_ref->y + dy;
+    const double x2 = seg->p2_ref->x + dx, y2 = seg->p2_ref->y + dy;
+    if (!std::isfinite(x1) || !std::isfinite(y1) || !std::isfinite(x2) || !std::isfinite(y2)) return;
+    if (auto_solve_enabled) {
+        solveWithTargets({{seg->p1_id, x1, y1}, {seg->p2_id, x2, y2}});
+    } else {
+        seg->p1_ref->x = x1;
+        seg->p1_ref->y = y1;
+        seg->p2_ref->x = x2;
+        seg->p2_ref->y = y2;
+        refreshSketch();
+    }
 }
 
 const OptimizeResult& ApiHandler::getLastSolveResult() const { return last_solve_result; }
