@@ -1,11 +1,27 @@
+import { bindDimensionEditor } from "./dimension-editor.js";
 import { api } from "./editor-api.js";
-import { renderSketch } from "./sketch-view.js";
-import { showToast, uiState } from "./editor-state.js";
-import { renderAll } from "./panels.js";
-import { loadPresetSlide30, loadPresetRectangle, loadPresetAll9Constraints, loadPresetLinkage } from "./presets.js";
+import { fitSketch, zoomBy } from "./sketch-view.js";
+import { showToast, resetSelection, uiState } from "./editor-state.js";
+import { renderAll, selectRestriction } from "./panels.js";
+import { nameDocument, loadPresetSlide30, loadPresetRectangle, loadPresetAll9Constraints, loadPresetLinkage } from "./presets.js";
 import { activateConstraintButton, setActiveTool } from "./tools.js";
 
+function deleteSelection() {
+  const { selectedRestrictionId, selectedSegmentIds, selectedPointIds } = uiState;
+  if (selectedRestrictionId !== null) {
+    api.removeRestriction(selectedRestrictionId);
+  } else {
+    const ids = [...selectedSegmentIds, ...selectedPointIds];
+    if (!ids.length) return false;
+    api.deletePrimitives(ids);
+  }
+  resetSelection();
+  setActiveTool("select");
+  return true;
+}
+
 export function bindControls() {
+  bindDimensionEditor(renderAll);
   document.querySelectorAll(".tool-btn").forEach(btn => {
     btn.addEventListener("click", () => setActiveTool(btn.dataset.tool));
   });
@@ -29,19 +45,40 @@ export function bindControls() {
     showToast("СЛАУ решена, геометрия эскиза обновлена");
   });
 
-  document.getElementById("btnResetView").addEventListener("click", () => {
-    uiState.camera = { x: 0, y: 0, scale: 1.8 };
-    document.getElementById("zoomLabel").textContent = "100%";
-    renderSketch();
-  });
+  document.getElementById("btnResetView").addEventListener("click", fitSketch);
+  document.getElementById("zoomIn").addEventListener("click", () => zoomBy(1.2));
+  document.getElementById("zoomOut").addEventListener("click", () => zoomBy(1 / 1.2));
 
   document.getElementById("btnClearSketch").addEventListener("click", () => {
     api.clearSketch();
-    uiState.selectedPointIds = [];
-    uiState.selectedSegmentIds = [];
-    uiState.segmentStart = null;
-    renderAll();
+    resetSelection();
+    nameDocument("Новый эскиз");
+    setActiveTool("select");
+    fitSketch();
     showToast("Рабочее поле очищено");
+  });
+
+  document.addEventListener("keydown", e => {
+    if (document.getElementById("viewEditor").classList.contains("hidden") || e.defaultPrevented || e.isComposing) return;
+    if (e.key === "Delete" || e.key === "Backspace") {
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey ||
+          e.target.isContentEditable || e.target.closest("input, textarea, select, [role=textbox]") ||
+          document.getElementById("sketchLibrary").matches(":popover-open") ||
+          !document.getElementById("paramModal").classList.contains("hidden") ||
+          uiState.draggingPointId !== null || uiState.draggingSegmentId !== null || uiState.isPanning || uiState.marquee) return;
+      if (deleteSelection()) e.preventDefault();
+      return;
+    }
+    if (e.key !== "Escape") return;
+    if (uiState.marquee) {
+      uiState.marquee = null;
+      renderAll();
+      return;
+    }
+    document.getElementById("paramModal").classList.add("hidden");
+    uiState.pendingModalCallback = null;
+    resetSelection();
+    setActiveTool("select");
   });
 
   // Модальное окно ввода параметров
@@ -60,6 +97,8 @@ export function bindControls() {
 
   // Делегирование событий в браузере ограничений и примитивов
   document.getElementById("restrictionsList").addEventListener("click", (e) => {
+    const select = e.target.closest("[data-select-restriction]");
+    if (select) selectRestriction(Number(select.dataset.selectRestriction));
     const btn = e.target.closest("[data-remove-restriction]");
     if (btn) {
       const rid = Number(btn.dataset.removeRestriction);
@@ -127,15 +166,10 @@ export function bindControls() {
     pPan.classList.toggle("hidden", tab !== "primitives");
     jPan.classList.toggle("hidden", tab !== "json");
 
-    rBtn.className = tab === "restrictions"
-      ? "flex-1 py-1.5 px-2 text-xs font-semibold rounded-t-md bg-slate-800 text-teal-300 border-b-2 border-teal-400"
-      : "flex-1 py-1.5 px-2 text-xs font-semibold rounded-t-md text-slate-400 hover:text-slate-200";
-    pBtn.className = tab === "primitives"
-      ? "flex-1 py-1.5 px-2 text-xs font-semibold rounded-t-md bg-slate-800 text-sky-300 border-b-2 border-sky-400"
-      : "flex-1 py-1.5 px-2 text-xs font-semibold rounded-t-md text-slate-400 hover:text-slate-200";
-    jBtn.className = tab === "json"
-      ? "py-1.5 px-2.5 text-xs font-semibold rounded-t-md bg-slate-800 text-purple-300 border-b-2 border-purple-400 mono"
-      : "py-1.5 px-2.5 text-xs font-semibold rounded-t-md text-slate-400 hover:text-slate-200 mono";
+    for (const [name, btn] of [["restrictions", rBtn], ["primitives", pBtn], ["json", jBtn]]) {
+      if (name === tab) btn.setAttribute("aria-current", "true");
+      else btn.removeAttribute("aria-current");
+    }
   }
 
   document.getElementById("rightTabRestrictions").addEventListener("click", () => switchRightTab("restrictions"));
@@ -153,10 +187,10 @@ export function bindControls() {
     try {
       const area = document.getElementById("jsonSerializerArea");
       api.loadSketch(JSON.parse(area.value));
-      uiState.selectedPointIds = [];
-      uiState.selectedSegmentIds = [];
-      uiState.segmentStart = null;
-      renderAll();
+      resetSelection();
+      nameDocument("Импортированный эскиз");
+      setActiveTool("select");
+      fitSketch();
       showToast("Эскиз загружен из JSON");
     } catch (err) {
       showToast("Ошибка разбора JSON: " + err.message);
@@ -169,15 +203,11 @@ export function bindControls() {
     document.getElementById("viewMatrix").classList.toggle("hidden", tab !== "matrix");
     document.getElementById("viewArch").classList.toggle("hidden", tab !== "arch");
 
-    document.getElementById("tabBtnEditor").className = tab === "editor"
-      ? "px-3 py-1 rounded-md text-xs font-medium bg-blue-600 text-white transition"
-      : "px-3 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-white transition";
-    document.getElementById("tabBtnMatrix").className = tab === "matrix"
-      ? "px-3 py-1 rounded-md text-xs font-medium bg-blue-600 text-white transition"
-      : "px-3 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-white transition";
-    document.getElementById("tabBtnArch").className = tab === "arch"
-      ? "px-3 py-1 rounded-md text-xs font-medium bg-blue-600 text-white transition"
-      : "px-3 py-1 rounded-md text-xs font-medium text-slate-300 hover:text-white transition";
+    for (const [name, id] of [["editor", "tabBtnEditor"], ["matrix", "tabBtnMatrix"], ["arch", "tabBtnArch"]]) {
+      const btn = document.getElementById(id);
+      if (name === tab) btn.setAttribute("aria-current", "page");
+      else btn.removeAttribute("aria-current");
+    }
 
     renderAll();
   }

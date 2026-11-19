@@ -101,10 +101,15 @@ int ApiHandler::createSegmentAt(double x1, double y1, double x2, double y2, int 
     return segment ? segment->id : -1;
 }
 
-bool ApiHandler::deletePrimitive(int id) {
-    bool ok = repo.removePrimitive(id);
-    if (ok) last_solve_result = GeomSolver::solve(repo);
-    return ok;
+bool ApiHandler::deletePrimitive(int id) { return deletePrimitives({id}); }
+
+bool ApiHandler::deletePrimitives(const std::vector<int>& ids) {
+    bool changed = false;
+    for (const int id : ids) {
+        if (repo.removePrimitive(id)) changed = true;
+    }
+    if (changed) solveSketch();
+    return changed;
 }
 
 int ApiHandler::applyRestriction(int type_code, const std::vector<int>& p_ids,
@@ -158,6 +163,10 @@ int ApiHandler::queryPoint(double x, double y, double radius, const std::vector<
 
 int ApiHandler::querySegment(double x, double y, double radius) const {
     return HelperFunctions::querySegmentAt(repo, x, y, radius);
+}
+
+std::vector<int> ApiHandler::queryBox(double x1, double y1, double x2, double y2) const {
+    return HelperFunctions::queryBox(repo, x1, y1, x2, y2);
 }
 
 void ApiHandler::movePoint(int point_id, double target_x, double target_y) {

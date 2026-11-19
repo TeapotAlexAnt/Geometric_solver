@@ -72,9 +72,11 @@ export const api = {
     `L${getAllPrimitives().segments.length + 1}`
   ),
   deletePrimitive: id => update("deletePrimitive", id),
+  deletePrimitives: ids => update("deletePrimitives", ids),
   movePoint: (id, x, y) => update("movePoint", id, x, y),
   moveSegment: (id, dx, dy) => update("moveSegment", id, dx, dy),
   queryPoint: (x, y, radius, excluded = []) => api.findPoint(backend.queryPoint(x, y, radius, excluded)),
+  queryBox: (start, end) => backend.queryBox(start.x, start.y, end.x, end.y),
   querySegment: (x, y, radius) => api.findSegment(backend.querySegment(x, y, radius)),
   applyRestriction: (type, points, segments, value = 0, value2 = 0) =>
     update("applyRestriction", RestrictionMeta[type].code, points, segments, value, value2),

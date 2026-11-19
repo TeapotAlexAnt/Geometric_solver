@@ -163,6 +163,21 @@ int main() {
         assert(deleted);
         assert(!repo.findSegment(first_id) && !repo.findPoint(deleted_start) && !repo.findPoint(deleted_end));
         assert(repo.findSegment(second_id) && repo.findPoint(standalone) && repo.restrictions.empty());
+
+        const bool batch_deleted = api.deletePrimitives({b->id, second_id, standalone});
+        assert(batch_deleted);
+        assert(repo.segments.empty() && repo.points.empty() && api.getLastSolveResult().final_params.empty());
+    }
+
+    {
+        ApiHandler api;
+        const int point = api.createPoint(5, 5);
+        const int inner = api.createSegmentAt(1, 1, 8, 8);
+        const int through = api.createSegmentAt(-5, 5, 15, 5);
+        const int tangent = api.createSegmentAt(-5, 5, 5, -5);
+        api.createSegmentAt(-5, 4, 4, -5); // Bounding boxes overlap but the line misses the window.
+        assert(api.queryBox(0, 10, 10, 0) == std::vector<int>({point, inner}));
+        assert(api.queryBox(10, 0, 0, 10) == std::vector<int>({point, inner, through, tangent}));
     }
 
     std::cout << "=== Все 9 ограничений и СЛАУ успешно прошли проверку! ===" << std::endl;

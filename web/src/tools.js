@@ -4,30 +4,14 @@ import { renderAll } from "./panels.js";
 import { RestrictionMeta } from "./restriction-meta.js";
 
 export function setActiveTool(toolName) {
+  document.getElementById("paramModal").classList.add("hidden");
+  uiState.pendingModalCallback = null;
   uiState.activeTool = toolName;
   uiState.activeConstraintTool = null;
   uiState.segmentStart = null;
 
-  document.querySelectorAll(".tool-btn").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.tool === toolName);
-  });
-  document.querySelectorAll(".constraint-btn").forEach(btn => btn.classList.remove("active"));
-
-  const badge = document.getElementById("modePromptBadge");
-  const hint = document.getElementById("modeHintText");
-  if (toolName === "select") {
-    badge.textContent = "Режим: Курсор (Pointer Usecase)";
-    hint.textContent = "Перетаскивайте точки или отрезки мышью — решатель пересчитывает эскиз в реальном времени.";
-  } else if (toolName === "point") {
-    badge.textContent = "Режим: Создание точки";
-    hint.textContent = "Кликните в любом месте рабочего поля, чтобы добавить отдельную точку.";
-  } else if (toolName === "segment") {
-    badge.textContent = "Режим: Создание отрезка";
-    hint.textContent = "Укажите начало и конец отрезка. Клик по существующей точке добавит ограничение совпадения.";
-  } else if (toolName === "delete") {
-    badge.textContent = "Режим: Удаление объектов";
-    hint.textContent = "Клик по отрезку или его концу удаляет весь отрезок. Отдельная точка удаляется сама.";
-  }
+  uiState.selectedRestrictionId = null;
+  uiState.hoveredRestrictionId = null;
   renderAll();
 }
 
@@ -70,7 +54,7 @@ export function tryApplyConstraintFromSelection(type) {
     api.applyRestriction("COINCIDENT", [pts[0], pts[1]], []);
     uiState.selectedPointIds = [];
     uiState.activeConstraintTool = null;
-    document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+
     showToast("Наложено ограничение: Совпадение двух точек");
     renderAll();
     return true;
@@ -101,7 +85,7 @@ export function tryApplyConstraintFromSelection(type) {
         uiState.selectedPointIds = [];
         uiState.selectedSegmentIds = [];
         uiState.activeConstraintTool = null;
-        document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+
         showToast(`Наложено расстояние d = ${val.toFixed(1)} мм`);
         renderAll();
       });
@@ -116,7 +100,7 @@ export function tryApplyConstraintFromSelection(type) {
       api.applyRestriction(type, [s1.p1_id, s1.p2_id, s2.p1_id, s2.p2_id], [s1.id, s2.id]);
       uiState.selectedSegmentIds = [];
       uiState.activeConstraintTool = null;
-      document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+
       showToast(`Наложено ограничение: ${RestrictionMeta[type].name}`);
       renderAll();
       return true;
@@ -136,7 +120,7 @@ export function tryApplyConstraintFromSelection(type) {
       uiState.selectedPointIds = [];
       uiState.selectedSegmentIds = [];
       uiState.activeConstraintTool = null;
-      document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+
       showToast(`Наложено ограничение: ${RestrictionMeta[type].name}`);
       renderAll();
       return true;
@@ -161,7 +145,7 @@ export function tryApplyConstraintFromSelection(type) {
         api.applyRestriction("ANGLE", [s1.p1_id, s1.p2_id, s2.p1_id, s2.p2_id], [s1.id, s2.id], val);
         uiState.selectedSegmentIds = [];
         uiState.activeConstraintTool = null;
-        document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+
         showToast(`Задан угол ${val.toFixed(1)}°`);
         renderAll();
       });
@@ -177,7 +161,7 @@ export function tryApplyConstraintFromSelection(type) {
       uiState.selectedPointIds = [];
       uiState.selectedSegmentIds = [];
       uiState.activeConstraintTool = null;
-      document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+
       showToast(`Наложено ограничение: ${pt.label} принадлежит прямой ${seg.label}`);
       renderAll();
       return true;
@@ -198,7 +182,7 @@ export function tryApplyConstraintFromSelection(type) {
         api.applyRestriction("FIX_POINT", [pt.id], [], xc, yc);
         uiState.selectedPointIds = [];
         uiState.activeConstraintTool = null;
-        document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
+
         showToast(`Точка ${pt.label} зафиксирована в (${xc.toFixed(1)}, ${yc.toFixed(1)})`);
         renderAll();
       });
@@ -210,6 +194,10 @@ export function tryApplyConstraintFromSelection(type) {
 }
 
 export function activateConstraintButton(type) {
+  uiState.selectedRestrictionId = null;
+  uiState.hoveredRestrictionId = null;
+  document.getElementById("paramModal").classList.add("hidden");
+  uiState.pendingModalCallback = null;
   // Если нужные объекты уже выделены — сразу применяем ограничение
   if (tryApplyConstraintFromSelection(type)) return;
 
@@ -219,12 +207,25 @@ export function activateConstraintButton(type) {
   uiState.selectedPointIds = [];
   uiState.selectedSegmentIds = [];
 
-  document.querySelectorAll(".constraint-btn").forEach(btn => {
-    btn.classList.toggle("active", btn.dataset.constraint === type);
-  });
+  renderAll();
+}
 
-  const meta = RestrictionMeta[type];
-  document.getElementById("modePromptBadge").textContent = `Ограничение: ${meta.name}`;
+const toolInfo = {
+  select: ["Выбор", "Тяните рамку для выбора. Для сдвига вида удерживайте колёсико или второй щелчок трекпада."],
+  point: ["Точка", "Укажите положение новой точки."],
+  segment: ["Отрезок", "Укажите начало и конец. Щелчок по точке связывает концы."],
+  delete: ["Удаление", "Выберите точку или отрезок для удаления."]
+};
+
+export function updateToolDisplay() {
+  const type = uiState.activeConstraintTool;
+  for (const button of document.querySelectorAll(".tool-btn, .constraint-btn")) {
+    const active = type ? button.dataset.constraint === type : button.dataset.tool === uiState.activeTool;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active);
+  }
+  const [name, hint] = toolInfo[uiState.activeTool];
+  document.getElementById("modePromptBadge").textContent = type ? RestrictionMeta[type].name : name;
   const hints = {
     COINCIDENT: "Кликните последовательно по 2 точкам на рабочем поле для их совмещения.",
     DISTANCE: "Кликните по 1 отрезку или по 2 точкам для задания расстояния d.",
@@ -236,6 +237,16 @@ export function activateConstraintButton(type) {
     POINT_ON_LINE: "Кликните по 1 точке и по 1 отрезку (в любом порядке).",
     FIX_POINT: "Кликните по точке, которую необходимо зафиксировать в пространстве."
   };
-  document.getElementById("modeHintText").textContent = hints[type] || "";
-  renderAll();
+  let prompt = hints[type] || hint;
+  if (!type && uiState.activeTool === "select") {
+    if (uiState.selectedRestrictionId !== null) {
+      const selected = api.getAllPrimitives().restrictions.find(r => r.id === uiState.selectedRestrictionId);
+      prompt = selected?.type === "DISTANCE" || selected?.type === "ANGLE"
+        ? "Двойной щелчок по размеру — изменить. Delete — снять связь."
+        : "Delete — снять связь. Esc — снять выделение.";
+    } else if (uiState.selectedPointIds.length || uiState.selectedSegmentIds.length) {
+      prompt = "Delete — удалить выделение. Shift + щелчок — изменить состав выделения.";
+    }
+  }
+  document.getElementById("modeHintText").textContent = prompt;
 }

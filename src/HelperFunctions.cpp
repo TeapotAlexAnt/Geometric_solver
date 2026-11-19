@@ -45,6 +45,39 @@ int HelperFunctions::querySegmentAt(const GeomRepository& repo, double x, double
     return best_id;
 }
 
+std::vector<int> HelperFunctions::queryBox(const GeomRepository& repo, double x1, double y1, double x2,
+                                           double y2) {
+    const double left = std::min(x1, x2), right = std::max(x1, x2);
+    const double bottom = std::min(y1, y2), top = std::max(y1, y2);
+    const auto inside = [&](const PointFigure& p) {
+        return left <= p.x && p.x <= right && bottom <= p.y && p.y <= top;
+    };
+    // Clip the segment's parameter interval against both coordinate ranges.
+    const auto intersects = [&](const PointFigure& a, const PointFigure& b) {
+        double enter = 0.0, leave = 1.0;
+        const auto clip = [&](double start, double end, double lo, double hi) {
+            if (start == end) return lo <= start && start <= hi;
+            const double t1 = (lo - start) / (end - start);
+            const double t2 = (hi - start) / (end - start);
+            enter = std::max(enter, std::min(t1, t2));
+            leave = std::min(leave, std::max(t1, t2));
+            return enter <= leave;
+        };
+        return clip(a.x, b.x, left, right) && clip(a.y, b.y, bottom, top);
+    };
+
+    std::vector<int> ids;
+    for (const auto& p : repo.points) {
+        if (!p->segment_id && inside(*p)) ids.push_back(p->id);
+    }
+    for (const auto& s : repo.segments) {
+        const auto& a = *s->p1_ref;
+        const auto& b = *s->p2_ref;
+        if (x1 > x2 ? intersects(a, b) : inside(a) && inside(b)) ids.push_back(s->id);
+    }
+    return ids;
+}
+
 int HelperFunctions::countEquations(const GeomRepository& repo) {
     int total_eqs = 0;
     for (const auto& r : repo.restrictions) {

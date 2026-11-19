@@ -15,6 +15,8 @@ class HelperFunctions {
 
     static int querySegmentAt(const GeomRepository& repo, double x, double y, double tolerance = 8.0);
 
+    static std::vector<int> queryBox(const GeomRepository& repo, double x1, double y1, double x2, double y2);
+
     static int countEquations(const GeomRepository& repo);
 
     static std::vector<std::vector<const PointFigure*>>

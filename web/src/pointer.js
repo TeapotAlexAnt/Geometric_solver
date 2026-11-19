@@ -1,10 +1,39 @@
+import { openDimensionEditor } from "./dimension-editor.js";
 import { api } from "./editor-api.js";
-import { sketch, renderSketch, screenToWorld } from "./sketch-view.js";
+import { sketch, renderSketch, screenToWorld, zoomBy } from "./sketch-view.js";
 import { uiState } from "./editor-state.js";
-import { renderAll } from "./panels.js";
+import { renderAll, selectRestriction } from "./panels.js";
 import { tryApplyConstraintFromSelection } from "./tools.js";
 
 export function bindPointerEvents() {
+  let lastBlankSelection = null;
+
+  function startPan(x, y) {
+    uiState.marquee = null;
+    uiState.isPanning = true;
+    uiState.panLastScreen = { x, y };
+    sketch.classList.add("panning");
+  }
+
+  // A trackpad reports a double-click-and-hold as a native second mouse press.
+  sketch.addEventListener("mousedown", e => {
+    const box = uiState.marquee;
+    if (e.button !== 0 || e.detail !== 2 || !box || e.shiftKey) return;
+    if (lastBlankSelection?.snapshot === api.getAllPrimitives()) {
+      uiState.selectedPointIds = lastBlankSelection.points;
+      uiState.selectedSegmentIds = lastBlankSelection.segments;
+      uiState.selectedRestrictionId = lastBlankSelection.restriction;
+    }
+    lastBlankSelection = null;
+    startPan(box.startX, box.startY);
+    renderAll();
+    e.preventDefault();
+  });
+
+  sketch.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.repeat && openDimensionEditor(uiState.selectedRestrictionId)) e.preventDefault();
+  });
+
   sketch.addEventListener("pointerdown", (e) => {
     if (!e.isPrimary) return;
     const rect = sketch.getBoundingClientRect();
@@ -13,12 +42,23 @@ export function bindPointerEvents() {
 
     if (e.button === 1 || e.button === 2 || e.altKey) {
       sketch.setPointerCapture(e.pointerId);
-      uiState.isPanning = true;
-      uiState.panLastScreen = { x: sx, y: sy };
+      startPan(sx, sy);
+      e.preventDefault();
       return;
     }
     if (e.button !== 0) return;
-
+    sketch.focus({ preventScroll: true });
+    const annotation = e.target.closest("[data-restriction-id]");
+    if (annotation && uiState.activeTool === "select" && !uiState.activeConstraintTool) {
+      const id = Number(annotation.dataset.restrictionId);
+      // Re-rendering after selection replaces the SVG hit target between clicks.
+      if (id === uiState.selectedRestrictionId && openDimensionEditor(id, { x: sx, y: sy })) {
+        e.preventDefault();
+        return;
+      }
+      selectRestriction(id, true);
+      return;
+    }
     const world = screenToWorld(sx, sy);
     const hitRadiusWorld = 11 / uiState.camera.scale;
     let hitPt = api.queryPoint(world.x, world.y, hitRadiusWorld);
@@ -77,6 +117,7 @@ export function bindPointerEvents() {
 
     // Режим select / drag (Pointer Usecase)
     sketch.setPointerCapture(e.pointerId);
+    if (hitPt || hitSeg) uiState.selectedRestrictionId = null;
     if (hitPt) {
       if (e.shiftKey) {
         const idx = uiState.selectedPointIds.indexOf(hitPt.id);
@@ -99,12 +140,8 @@ export function bindPointerEvents() {
       uiState.draggingSegmentId = hitSeg.id;
       uiState.dragLastWorld = world;
     } else {
-      if (!e.shiftKey) {
-        uiState.selectedPointIds = [];
-        uiState.selectedSegmentIds = [];
-      }
-      uiState.isPanning = true;
-      uiState.panLastScreen = { x: sx, y: sy };
+      uiState.marquee = { startX: sx, startY: sy, x: sx, y: sy, hits: null, additive: e.shiftKey };
+      return;
     }
     renderAll();
   });
@@ -128,6 +165,12 @@ export function bindPointerEvents() {
       return;
     }
 
+    if (uiState.marquee) {
+      updateBox(sx, sy);
+      renderSketch();
+      return;
+    }
+
     if (uiState.draggingPointId !== null) {
       api.movePoint(uiState.draggingPointId, world.x, world.y);
       renderAll();
@@ -143,18 +186,60 @@ export function bindPointerEvents() {
       return;
     }
 
-    const hitPt = api.queryPoint(world.x, world.y, 11 / uiState.camera.scale);
-    const hitSeg = !hitPt ? api.querySegment(world.x, world.y, 8 / uiState.camera.scale) : null;
+    const marker = e.target.closest("[data-restriction-id]");
+    const hoveredId = marker ? Number(marker.dataset.restrictionId) : null;
+    const annotationChanged = hoveredId !== uiState.hoveredRestrictionId;
+    uiState.hoveredRestrictionId = hoveredId;
+    const hitPt = !marker && api.queryPoint(world.x, world.y, 11 / uiState.camera.scale);
+    const hitSeg = !marker && !hitPt ? api.querySegment(world.x, world.y, 8 / uiState.camera.scale) : null;
     const pointId = hitPt?.id ?? null;
     const segmentId = hitSeg?.id ?? null;
     const hoverChanged = pointId !== uiState.hoveredPointId || segmentId !== uiState.hoveredSegmentId;
     uiState.hoveredPointId = pointId;
     uiState.hoveredSegmentId = segmentId;
-    if (hoverChanged || uiState.segmentStart !== null) renderSketch();
+    if (annotationChanged || hoverChanged || uiState.segmentStart !== null) renderSketch();
   });
+
+  function updateBox(x, y) {
+    const box = uiState.marquee;
+    box.x = x;
+    box.y = y;
+    if (!box.hits && Math.hypot(x - box.startX, y - box.startY) < 4) return;
+    const start = screenToWorld(box.startX, box.startY, false);
+    const end = screenToWorld(x, y, false);
+    box.hits = new Set(api.queryBox(start, end));
+  }
+
+  function selectBox(box) {
+    const state = api.getAllPrimitives();
+    lastBlankSelection = box.hits ? null : {
+      snapshot: state, points: uiState.selectedPointIds, segments: uiState.selectedSegmentIds,
+      restriction: uiState.selectedRestrictionId
+    };
+    const points = new Set(box.additive ? uiState.selectedPointIds : []);
+    const segments = new Set(box.additive ? uiState.selectedSegmentIds : []);
+    if (box.hits) {
+      for (const p of state.standalonePoints) if (box.hits.has(p.id)) points.add(p.id);
+      for (const s of state.segments) if (box.hits.has(s.id)) segments.add(s.id);
+    }
+    uiState.selectedPointIds = [...points];
+    uiState.selectedSegmentIds = [...segments];
+    if (box.hits || !box.additive) uiState.selectedRestrictionId = null;
+  }
 
   function endDrag(e) {
     if (!e.isPrimary) return;
+    const box = uiState.marquee;
+    if (box) {
+      if (e.type === "pointerup") {
+        const rect = sketch.getBoundingClientRect();
+        updateBox(e.clientX - rect.left, e.clientY - rect.top);
+        selectBox(box);
+      }
+      uiState.marquee = null;
+      renderAll();
+    }
+    sketch.classList.remove("panning");
     uiState.draggingPointId = null;
     uiState.draggingSegmentId = null;
     uiState.isPanning = false;
@@ -164,6 +249,7 @@ export function bindPointerEvents() {
   sketch.addEventListener("pointercancel", endDrag);
   sketch.addEventListener("lostpointercapture", endDrag);
   sketch.addEventListener("pointerleave", () => {
+    uiState.hoveredRestrictionId = null;
     uiState.hoveredPointId = null;
     uiState.hoveredSegmentId = null;
     renderSketch();
@@ -173,9 +259,9 @@ export function bindPointerEvents() {
 
   sketch.addEventListener("wheel", (e) => {
     e.preventDefault();
+    if (uiState.marquee || uiState.isPanning) return;
     const factor = e.deltaY < 0 ? 1.12 : 0.89;
-    uiState.camera.scale = Math.max(0.25, Math.min(8.0, uiState.camera.scale * factor));
-    document.getElementById("zoomLabel").textContent = `${Math.round((uiState.camera.scale / 1.8) * 100)}%`;
-    renderSketch();
+    const rect = sketch.getBoundingClientRect();
+    zoomBy(factor, e.clientX - rect.left, e.clientY - rect.top);
   }, { passive: false });
 }

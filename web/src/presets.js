@@ -1,14 +1,25 @@
 import { api } from "./editor-api.js";
-import { showToast, uiState } from "./editor-state.js";
-import { renderAll } from "./panels.js";
+import { showToast, resetSelection } from "./editor-state.js";
+import { fitSketch } from "./sketch-view.js";
+import { setActiveTool } from "./tools.js";
 
-function loadPreset(sketch, message) {
+export function nameDocument(title, presetId) {
+  document.getElementById("documentTitle").textContent = title;
+  document.getElementById("sketchLibrary").hidePopover();
+  document.querySelectorAll(".example").forEach(button => {
+    if (button.id === presetId) button.setAttribute("aria-current", "true");
+    else button.removeAttribute("aria-current");
+  });
+}
+
+function loadPreset(sketch, presetId, notify = true) {
   api.loadSketch(sketch);
-  uiState.selectedPointIds = [];
-  uiState.selectedSegmentIds = [];
-  uiState.segmentStart = null;
-  renderAll();
-  showToast(message);
+  resetSelection();
+  const title = document.querySelector(`#${presetId} span`).firstChild.textContent;
+  nameDocument(title, presetId);
+  setActiveTool("select");
+  fitSketch();
+  if (notify) showToast(`Открыт эскиз «${title}»`);
 }
 
 export function loadPresetSlide30() {
@@ -24,7 +35,7 @@ export function loadPresetSlide30() {
       {id: 4, type: "FIX_POINT", p_ids: [1], seg_ids: [], value: -60, value2: -20},
       {id: 5, type: "DISTANCE", p_ids: [1, 2], seg_ids: [3], value: 120}
     ]
-  }, "Загружен пример со слайда 30: Фиксация точки + Длина отрезка");
+  }, "presetSlide30");
 }
 
 export function loadPresetRectangle() {
@@ -50,10 +61,10 @@ export function loadPresetRectangle() {
       {id: 14, type: "DISTANCE", p_ids: [1, 2], seg_ids: [5], value: 180},
       {id: 15, type: "DISTANCE", p_ids: [2, 3], seg_ids: [6], value: 110}
     ]
-  }, "Загружен параметрический прямоугольник 180×110 мм");
+  }, "presetRect");
 }
 
-export function loadPresetAll9Constraints() {
+export function loadPresetAll9Constraints(notify = true) {
   loadPreset({
     points: [
       {id: 1, x: -120, y: -60, label: "P1"},
@@ -84,7 +95,7 @@ export function loadPresetAll9Constraints() {
       {id: 22, type: "ANGLE", p_ids: [1, 2, 5, 6], seg_ids: [8, 12], value: 60},
       {id: 23, type: "POINT_ON_LINE", p_ids: [7, 5, 6], seg_ids: [12]}
     ]
-  }, "Загружен демо-стенд со всеми 9 типами геометрических ограничений");
+  }, "presetAll9", notify);
 }
 
 export function loadPresetLinkage() {
@@ -108,5 +119,5 @@ export function loadPresetLinkage() {
       {id: 12, type: "DISTANCE", p_ids: [2, 3], seg_ids: [6], value: 135},
       {id: 13, type: "DISTANCE", p_ids: [4, 3], seg_ids: [7], value: 120}
     ]
-  }, "Шарнирный четырёхзвенник (DOF=1): потяните точку P2 или P3 мышью!");
+  }, "presetLinkage");
 }

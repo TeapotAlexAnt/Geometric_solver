@@ -2,6 +2,8 @@ import { api } from "./editor-api.js";
 import { renderSketch } from "./sketch-view.js";
 import { uiState } from "./editor-state.js";
 import { RestrictionMeta } from "./restriction-meta.js";
+import { icon } from "./icons.js";
+import { updateToolDisplay } from "./tools.js";
 import { mathMarkup, numberTex } from "./math.js";
 
 const htmlEntities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
@@ -29,6 +31,9 @@ function formatSketch(json) {
 }
 
 export function renderAll() {
+  const state = api.getAllPrimitives();
+  if (!state.restrictions.some(r => r.id === uiState.selectedRestrictionId)) uiState.selectedRestrictionId = null;
+  updateToolDisplay();
   renderSketch();
   updateHeaderStatus();
   renderRestrictionsBrowser();
@@ -52,22 +57,22 @@ function updateHeaderStatus() {
 
   const eqBadge = document.getElementById("equilibriumBadge");
   if (res.converged || state.restrictions.length === 0) {
-    eqBadge.textContent = "Равновесное";
-    eqBadge.className = "font-semibold text-emerald-400";
+    eqBadge.textContent = "Равновесие";
+    eqBadge.dataset.state = "ready";
   } else {
-    eqBadge.textContent = "Неравновесное (Конфликт)";
-    eqBadge.className = "font-semibold text-rose-400";
+    eqBadge.textContent = "Конфликт";
+    eqBadge.dataset.state = "error";
   }
 
   const defBadge = document.getElementById("modelDefBadge");
   if (state.points.length === 0) {
-    defBadge.textContent = "(Пустой эскиз)";
+    defBadge.textContent = "Пустой эскиз";
   } else if (dof === 0) {
-    defBadge.textContent = "(Полностью определена)";
+    defBadge.textContent = "Полностью определён";
   } else if (dof > 0) {
-    defBadge.textContent = `(Недоопределена: своб. ${dof})`;
+    defBadge.textContent = `Недоопределён`;
   } else {
-    defBadge.textContent = `(Переопределена: избыт. ${-dof})`;
+    defBadge.textContent = `Переопределён`;
   }
 
   document.getElementById("countRestrictions").textContent = state.restrictions.length;
@@ -95,107 +100,73 @@ function describeRestrictionTargets(r) {
   return pLabels.join(", ");
 }
 
+export function selectRestriction(id, reveal = false) {
+  uiState.selectedRestrictionId = id;
+  uiState.selectedPointIds = [];
+  uiState.selectedSegmentIds = [];
+  uiState.segmentStart = null;
+  uiState.activeConstraintTool = null;
+  uiState.activeTool = "select";
+  document.getElementById("rightTabRestrictions").click();
+  renderAll();
+  const row = document.querySelector(`[data-select-restriction="${id}"]`);
+  if (reveal) row?.parentElement.scrollIntoView({ block: "nearest" });
+  else row?.focus({ preventScroll: true });
+}
+
 function renderRestrictionsBrowser() {
-  const listEl = document.getElementById("restrictionsList");
-  const restrictions = api.getAllPrimitives().restrictions;
-  if (restrictions.length === 0) {
-    listEl.innerHTML = `
-      <div class="p-4 rounded-lg bg-slate-950/60 border border-slate-800/80 text-center text-xs text-slate-400">
-        На эскиз пока не наложены геометрические ограничения.<br/>
-        Выберите примитивы на холсте или нажмите любую из 9 кнопок ограничений слева.
-      </div>`;
+  const list = document.getElementById("restrictionsList");
+  const { restrictions } = api.getAllPrimitives();
+  if (!restrictions.length) {
+    list.innerHTML = '<p class="empty">Ограничений пока нет. Выберите связь на панели инструментов.</p>';
     return;
   }
-
-  listEl.innerHTML = "";
+  const collapsed = new Map([...list.querySelectorAll("details")].map(el => [el.dataset.group, !el.open]));
+  const groups = new Map([["Размеры", []], ["Геометрические связи", []], ["Совпадения", []]]);
   for (const r of restrictions) {
-    const meta = RestrictionMeta[r.type];
-    const card = document.createElement("div");
-    card.className = "p-2.5 rounded-lg bg-slate-950/90 border border-slate-800 hover:border-slate-700 flex flex-col gap-1.5 text-xs";
-
-    const topRow = document.createElement("div");
-    topRow.className = "flex items-center justify-between gap-2";
-    topRow.innerHTML = `
-      <div class="flex items-center gap-2">
-        <span class="w-5 h-5 rounded bg-teal-500/15 border border-teal-500/30 text-teal-300 flex items-center justify-center font-bold mono text-[11px]">${meta.badge}</span>
-        <span class="font-semibold text-slate-100">${meta.name}</span>
-      </div>
-      <button data-remove-restriction="${r.id}" class="px-1.5 py-0.5 rounded bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 text-[11px] transition" title="Снять ограничение">
-        Снять ✕
-      </button>
-    `;
-    card.appendChild(topRow);
-
-    const targetRow = document.createElement("div");
-    targetRow.className = "flex items-center justify-between text-[11px] text-slate-400";
-    const resVal = Number(r.residual || 0);
-    const resColor = resVal < 1e-3 ? "text-emerald-400" : "text-rose-400";
-    targetRow.innerHTML = `
-      <span>Объекты: <strong class="text-slate-200 mono">${escapeHtml(describeRestrictionTargets(r))}</strong></span>
-      <span class="${resColor}">${mathMarkup("\\lvert f\\rvert=" + numberTex(resVal, 1))}</span>
-    `;
-    card.appendChild(targetRow);
-
-    // Редактируемые параметры прямо в браузере ограничений
-    if (r.type === "DISTANCE" || r.type === "ANGLE") {
-      const editRow = document.createElement("div");
-      editRow.className = "flex items-center gap-2 mt-0.5 pt-1.5 border-t border-slate-800/80";
-      const parameter = r.type === "DISTANCE" ? "Длина, мм" : "Угол, градусы";
-      editRow.innerHTML = `
-        <span class="text-[11px] text-slate-400">${parameter}</span>
-        <input type="number" step="any" value="${Number(r.value.toFixed(2))}" data-edit-restriction="${r.id}" class="w-24 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-sky-300 mono text-xs focus:outline-none focus:border-teal-400" />
-      `;
-      card.appendChild(editRow);
-    } else if (r.type === "FIX_POINT") {
-      const editRow = document.createElement("div");
-      editRow.className = "flex items-center gap-1.5 mt-0.5 pt-1.5 border-t border-slate-800/80 text-[11px]";
-      editRow.innerHTML = `
-        <span class="text-slate-400">${mathMarkup("x_c")}</span>
-        <input type="number" step="any" value="${Number(r.value.toFixed(1))}" data-edit-fix-x="${r.id}" class="w-16 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-rose-300 mono text-xs" />
-        <span class="text-slate-400">${mathMarkup("y_c")}</span>
-        <input type="number" step="any" value="${Number(r.value2.toFixed(1))}" data-edit-fix-y="${r.id}" class="w-16 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-rose-300 mono text-xs" />
-      `;
-      card.appendChild(editRow);
-    }
-
-    listEl.appendChild(card);
+    const dimension = r.type === "DISTANCE" || r.type === "ANGLE";
+    const group = dimension ? "Размеры" : r.type === "COINCIDENT" ? "Совпадения" : "Геометрические связи";
+    groups.get(group).push(r);
   }
+  function row(r) {
+    const selected = r.id === uiState.selectedRestrictionId;
+    const name = RestrictionMeta[r.type].name;
+    const displayName = r.type === "DISTANCE" ? "Длина" : r.type === "ANGLE" ? "Угол" : name.replace(/ (отрезков|отрезка|точки)$/, "");
+    const value = r.type === "DISTANCE" ? `${Number(r.value.toFixed(2))} мм` : r.type === "ANGLE" ? `${Number(r.value.toFixed(2))}°` : "";
+    const field = (label, attr, value) =>
+      `<label>${label}<input type="number" step="any" value="${value}" data-${attr}="${r.id}"></label>`;
+    let detail = "";
+    if (selected) {
+      let inputs = "";
+      if (r.type === "DISTANCE" || r.type === "ANGLE") {
+        inputs = field(r.type === "ANGLE" ? "Угол, °" : "Длина, мм", "edit-restriction", r.value);
+      } else if (r.type === "FIX_POINT") {
+        inputs = field("X, мм", "edit-fix-x", r.value) + field("Y, мм", "edit-fix-y", r.value2);
+      }
+      detail = `<div class="restriction-detail">${inputs}<footer><span>Невязка ${mathMarkup(numberTex(r.residual, 2))}</span>
+        <button data-remove-restriction="${r.id}">Снять связь</button></footer></div>`;
+    }
+    return `<div class="restriction-row${selected ? " selected" : ""}"><button class="restriction-select" data-select-restriction="${r.id}" aria-expanded="${selected}">
+      ${icon(r.type)}<span><strong>${displayName}</strong><small>${escapeHtml(describeRestrictionTargets(r))}</small></span><b>${value}</b></button>${detail}</div>`;
+  }
+  list.innerHTML = [...groups].filter(([, items]) => items.length).map(([name, items]) => {
+    const closed = collapsed.get(name) ?? name === "Совпадения";
+    const open = !closed || items.some(r => r.id === uiState.selectedRestrictionId);
+    return `<details data-group="${name}" ${open ? "open" : ""}><summary>${icon("chevron")}${name}<small>${items.length}</small></summary>${items.map(row).join("")}</details>`;
+  }).join("");
 }
 
 function renderPrimitivesBrowser() {
-  const listEl = document.getElementById("primitivesList");
-  const pts = api.getAllPrimitives().standalonePoints;
-  const segs = api.getAllPrimitives().segments;
-  if (pts.length === 0 && segs.length === 0) {
-    listEl.innerHTML = `<div class="p-4 rounded-lg bg-slate-950/60 border border-slate-800 text-center text-xs text-slate-400">Эскиз пуст. Создайте точки или отрезки.</div>`;
-    return;
+  const { standalonePoints, segments } = api.getAllPrimitives();
+  const row = (p, value) => `<div class="object-row">${icon(p.type === "point" ? "point" : "segment")}
+    <span><strong>${escapeHtml(p.label)}</strong><small>${value}</small></span>
+    <button data-remove-primitive="${p.id}" aria-label="Удалить ${escapeHtml(p.label)}">Удалить</button></div>`;
+  const rows = standalonePoints.map(p => row(p, `${p.x.toFixed(1)}, ${p.y.toFixed(1)} мм`));
+  for (const s of segments) {
+    const a = s.p1_ref, b = s.p2_ref;
+    rows.push(row(s, `${escapeHtml(a.label)}–${escapeHtml(b.label)} · ${Math.hypot(a.x - b.x, a.y - b.y).toFixed(1)} мм`));
   }
-
-  let html = "";
-  for (const p of pts) {
-    html += `
-      <div class="p-2 rounded-lg bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-2 text-xs">
-        <div class="flex items-center gap-2">
-          <span class="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 mono font-bold">${escapeHtml(p.label)}</span>
-          <span class="mono text-[11px] text-slate-300">(${p.x.toFixed(1)}, ${p.y.toFixed(1)})</span>
-        </div>
-        <button data-remove-primitive="${p.id}" class="px-1.5 py-0.5 rounded bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 text-[11px]">Удалить</button>
-      </div>`;
-  }
-  for (const s of segs) {
-    const len = (s.p1_ref && s.p2_ref) ? Math.hypot(s.p2_ref.x - s.p1_ref.x, s.p2_ref.y - s.p1_ref.y) : 0;
-    const p1Label = s.p1_ref ? s.p1_ref.label : `P${s.p1_id}`;
-    const p2Label = s.p2_ref ? s.p2_ref.label : `P${s.p2_id}`;
-    html += `
-      <div class="p-2 rounded-lg bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-2 text-xs">
-        <div>
-          <span class="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 mono font-bold mr-1.5">${escapeHtml(s.label)}</span>
-          <span class="text-[11px] text-slate-300">${escapeHtml(p1Label)}–${escapeHtml(p2Label)} · ${mathMarkup("L=" + len.toFixed(1))} мм</span>
-        </div>
-        <button data-remove-primitive="${s.id}" class="px-1.5 py-0.5 rounded bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 text-[11px]">Удалить</button>
-      </div>`;
-  }
-  listEl.innerHTML = html;
+  document.getElementById("primitivesList").innerHTML = rows.join("") || '<p class="empty">В эскизе пока нет объектов.</p>';
 }
 
 function updateJsonPanel() {
@@ -292,5 +263,6 @@ function updateSelectionBadge() {
   const pLabels = uiState.selectedPointIds.map(id => api.findPoint(id)?.label || `P${id}`);
   const sLabels = uiState.selectedSegmentIds.map(id => api.findSegment(id)?.label || `L${id}`);
   const all = [...pLabels, ...sLabels];
-  badge.textContent = all.length ? `Выделено: ${all.join(", ")}` : "Выделено: нет (клик по точке/отрезку)";
+  const r = api.getAllPrimitives().restrictions.find(r => r.id === uiState.selectedRestrictionId);
+  badge.textContent = r ? RestrictionMeta[r.type].name : all.length ? all.join(", ") : "";
 }

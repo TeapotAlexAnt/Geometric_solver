@@ -79,6 +79,8 @@ EMSCRIPTEN_BINDINGS(editor_api) {
         });
     function("deletePrimitive", +[](int id) { return g_api.deletePrimitive(id); });
     function(
+        "deletePrimitives", +[](const val& ids) { return g_api.deletePrimitives(cad::wasm::readIds(ids)); });
+    function(
         "applyRestriction",
         +[](int type, const val& points, const val& segments, double value, double value2) {
             return g_api.applyRestriction(type, cad::wasm::readIds(points), cad::wasm::readIds(segments),
@@ -94,6 +96,10 @@ EMSCRIPTEN_BINDINGS(editor_api) {
         });
     function(
         "querySegment", +[](double x, double y, double radius) { return g_api.querySegment(x, y, radius); });
+    function(
+        "queryBox", +[](double x1, double y1, double x2, double y2) {
+            return val::array(g_api.queryBox(x1, y1, x2, y2));
+        });
     function("movePoint", &api_move_point);
     function("moveSegment", +[](int id, double dx, double dy) { g_api.moveSegment(id, dx, dy); });
     function("solveSketch", +[]() { g_api.solveSketch(); });

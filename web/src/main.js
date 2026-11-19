@@ -15,6 +15,7 @@ import "@fontsource/jetbrains-mono/cyrillic-400.css";
 import "@fontsource/jetbrains-mono/cyrillic-500.css";
 import "@fontsource/jetbrains-mono/cyrillic-600.css";
 
+import { mountIcons } from "./icons.js";
 import { observeSketchSize } from "./sketch-view.js";
 import { bindControls } from "./controls.js";
 import { initEditorApi } from "./editor-api.js";
@@ -26,18 +27,19 @@ import { renderStaticMath } from "./math.js";
 async function start() {
   const badge = document.getElementById("wasmStatusBadge");
   try {
+    mountIcons();
     renderStaticMath();
     await initEditorApi();
     observeSketchSize();
-    loadPresetAll9Constraints();
+    loadPresetAll9Constraints(false);
     bindControls();
     bindPointerEvents();
     bindSourceViewer();
     badge.textContent = "WASM активен";
-    badge.classList.add("bg-emerald-500/15", "text-emerald-300", "border-emerald-500/30");
+    badge.dataset.state = "ready";
   } catch (error) {
     badge.textContent = "Ошибка запуска WASM";
-    badge.classList.add("text-rose-300", "border-rose-500/50");
+    badge.dataset.state = "error";
     console.error(error);
   }
 }

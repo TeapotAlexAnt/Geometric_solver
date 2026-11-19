@@ -29,6 +29,7 @@ class ApiHandler {
                         const std::string& label = "");
 
     bool deletePrimitive(int id);
+    bool deletePrimitives(const std::vector<int>& ids);
 
     int applyRestriction(int type_code, const std::vector<int>& p_ids, const std::vector<int>& seg_ids,
                          double val1, double val2 = 0.0);
@@ -46,6 +47,8 @@ class ApiHandler {
     int queryPoint(double x, double y, double radius, const std::vector<int>& excluded_ids = {}) const;
 
     int querySegment(double x, double y, double radius) const;
+
+    std::vector<int> queryBox(double x1, double y1, double x2, double y2) const;
 
     // Pointer Usecase: перемещение точки с пересчетом геометрии эскиза в реальном времени
     void movePoint(int point_id, double target_x, double target_y);
