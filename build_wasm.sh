@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "${OSTYPE:-}" == "msys"* || "${OSTYPE:-}" == "cygwin"* ]]; then
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -W)"
+else
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
 mode="${1:-release}"
 case "$mode" in
   debug) build_type=Debug ;;
