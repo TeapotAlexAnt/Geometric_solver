@@ -41,12 +41,12 @@
       <div class="px-2.5 py-1 rounded-md bg-slate-800/90 border border-slate-700/80 hidden md:flex items-center gap-2 mono text-[11px]">
         <span class="text-slate-400">Итер: <strong id="iterValue" class="text-slate-200">0</strong></span>
         <span class="text-slate-600">|</span>
-        <span class="text-slate-400">‖f‖∞: <strong id="residualValue" class="text-emerald-400">0.00e+0</strong></span>
+        <span class="text-slate-400"><span data-tex="\lVert f\rVert_\infty"></span> <strong id="residualValue" class="text-emerald-400">0</strong></span>
       </div>
     </div>
 
     <!-- Переключатель вкладок приложения -->
-    <div class="flex items-center gap-1 bg-slate-800/90 p-1 rounded-lg border border-slate-700">
+    <div class="flex flex-wrap items-center gap-1 bg-slate-800/90 p-1 rounded-lg border border-slate-700">
       <button id="tabBtnEditor" class="px-3 py-1 rounded-md text-xs font-medium bg-blue-600 text-white transition">
         Рабочее поле
       </button>
@@ -83,14 +83,14 @@
             <span class="text-base leading-none text-sky-400">●</span>
             <div>
               <div class="font-semibold">Точка</div>
-              <div class="text-[10px] opacity-75">Создать P(x,y)</div>
+              <div class="text-[10px] opacity-75">Отдельная точка</div>
             </div>
           </button>
           <button id="toolSegment" data-tool="segment" class="tool-btn flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium bg-slate-800/90 border border-slate-700/80 hover:border-slate-500 text-left">
             <span class="text-base leading-none text-indigo-400">╱</span>
             <div>
               <div class="font-semibold">Отрезок</div>
-              <div class="text-[10px] opacity-75">2 точки P1–P2</div>
+              <div class="text-[10px] opacity-75">Начало и конец</div>
             </div>
           </button>
           <button id="toolDelete" data-tool="delete" class="tool-btn flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs font-medium bg-slate-800/90 border border-slate-700/80 hover:border-rose-500/60 text-left">
@@ -115,7 +115,7 @@
               <span class="w-6 h-6 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 flex items-center justify-center font-bold mono text-xs">◎</span>
               <div>
                 <div class="font-medium text-slate-100">1. Совпадение точек</div>
-                <div class="text-[10px] text-slate-400">Выберите 2 точки (2 ур.)</div>
+                <div class="text-[10px] text-slate-400">Две точки, общие координаты</div>
               </div>
             </div>
           </button>
@@ -125,7 +125,7 @@
               <span class="w-6 h-6 rounded bg-sky-500/15 border border-sky-500/30 text-sky-300 flex items-center justify-center font-bold mono text-xs">↔</span>
               <div>
                 <div class="font-medium text-slate-100">2. Расстояние / Длина</div>
-                <div class="text-[10px] text-slate-400">2 точки или 1 отрезок (d)</div>
+                <div class="text-[10px] text-slate-400">Две точки или один отрезок</div>
               </div>
             </div>
           </button>
@@ -135,7 +135,7 @@
               <span class="w-6 h-6 rounded bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 flex items-center justify-center font-bold mono text-xs">∥</span>
               <div>
                 <div class="font-medium text-slate-100">3. Параллельность</div>
-                <div class="text-[10px] text-slate-400">2 отрезка (v₁₂ × v₃₄ = 0)</div>
+                <div class="text-[10px] text-slate-400">2 отрезка · <span data-tex="\mathbf{v}_{12}\times\mathbf{v}_{34}=0"></span></div>
               </div>
             </div>
           </button>
@@ -145,7 +145,7 @@
               <span class="w-6 h-6 rounded bg-purple-500/15 border border-purple-500/30 text-purple-300 flex items-center justify-center font-bold mono text-xs">⊥</span>
               <div>
                 <div class="font-medium text-slate-100">4. Перпендикулярность</div>
-                <div class="text-[10px] text-slate-400">2 отрезка (v₁₂ · v₃₄ = 0)</div>
+                <div class="text-[10px] text-slate-400">2 отрезка · <span data-tex="\mathbf{v}_{12}\cdot\mathbf{v}_{34}=0"></span></div>
               </div>
             </div>
           </button>
@@ -155,7 +155,7 @@
               <span class="w-6 h-6 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center font-bold mono text-xs">V</span>
               <div>
                 <div class="font-medium text-slate-100">5. Вертикальность</div>
-                <div class="text-[10px] text-slate-400">1 отрезок (x₂ − x₁ = 0)</div>
+                <div class="text-[10px] text-slate-400">1 отрезок · <span data-tex="X_2-X_1=0"></span></div>
               </div>
             </div>
           </button>
@@ -165,7 +165,7 @@
               <span class="w-6 h-6 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center justify-center font-bold mono text-xs">H</span>
               <div>
                 <div class="font-medium text-slate-100">6. Горизонтальность</div>
-                <div class="text-[10px] text-slate-400">1 отрезок (y₂ − y₁ = 0)</div>
+                <div class="text-[10px] text-slate-400">1 отрезок · <span data-tex="Y_2-Y_1=0"></span></div>
               </div>
             </div>
           </button>
@@ -175,7 +175,7 @@
               <span class="w-6 h-6 rounded bg-pink-500/15 border border-pink-500/30 text-pink-300 flex items-center justify-center font-bold mono text-xs">∠</span>
               <div>
                 <div class="font-medium text-slate-100">7. Угол между отрезками</div>
-                <div class="text-[10px] text-slate-400">2 отрезка (угол α°)</div>
+                <div class="text-[10px] text-slate-400">Два отрезка, угол в градусах</div>
               </div>
             </div>
           </button>
@@ -195,7 +195,7 @@
               <span class="w-6 h-6 rounded bg-rose-500/15 border border-rose-500/30 text-rose-300 flex items-center justify-center font-bold mono text-xs">🔒</span>
               <div>
                 <div class="font-medium text-slate-100">9. Фиксация точки</div>
-                <div class="text-[10px] text-slate-400">1 точка (x=x_c, y=y_c)</div>
+                <div class="text-[10px] text-slate-400">1 точка · <span data-tex="X=x_c,\;Y=y_c"></span></div>
               </div>
             </div>
           </button>
@@ -211,7 +211,7 @@
             <span class="text-[10px] mono text-sky-400">Лекция</span>
           </button>
           <button id="presetRect" class="px-2.5 py-1.5 rounded-md text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition flex items-center justify-between">
-            <span>Прямоугольник 180×110 (H,V,∥,⊥)</span>
+            <span>Прямоугольник 180 × 110 мм</span>
             <span class="text-[10px] mono text-emerald-400">Слайд 12</span>
           </button>
           <button id="presetAll9" class="px-2.5 py-1.5 rounded-md text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700 text-left transition flex items-center justify-between">
@@ -280,11 +280,11 @@
           <p id="paramModalDesc" class="text-xs text-slate-300 mb-2.5">Введите требуемое значение:</p>
           <div class="flex flex-col gap-2 mb-3">
             <div>
-              <label id="paramInput1Label" class="block text-[11px] text-slate-400 mb-1">Значение (d или α°):</label>
+              <label id="paramInput1Label" class="block text-[11px] text-slate-400 mb-1">Значение</label>
               <input id="paramInput1" type="number" step="any" class="w-full px-2.5 py-1.5 rounded bg-slate-800 border border-slate-700 text-white mono text-xs focus:outline-none focus:border-teal-400" />
             </div>
             <div id="paramInput2Wrapper" class="hidden">
-              <label id="paramInput2Label" class="block text-[11px] text-slate-400 mb-1">Координата Y (y_c):</label>
+              <label id="paramInput2Label" class="block text-[11px] text-slate-400 mb-1">Координата Y</label>
               <input id="paramInput2" type="number" step="any" class="w-full px-2.5 py-1.5 rounded bg-slate-800 border border-slate-700 text-white mono text-xs focus:outline-none focus:border-teal-400" />
             </div>
           </div>
@@ -373,38 +373,38 @@
             <h2 class="text-base sm:text-lg font-bold text-white">Постановка задачи оптимизации и система Лагранжа (**)</h2>
             <p class="text-xs text-slate-400">По материалам лекций кафедры РК6 (слайды 27–32): принцип наименьших изменений и аналитическая матрица Якоби</p>
           </div>
-          <span id="matrixStatsPill" class="px-3 py-1 rounded-full text-xs mono bg-blue-500/15 text-blue-300 border border-blue-500/30">
-            n = 0 параметров, m = 0 уравнений
-          </span>
+          <span id="matrixStatsPill" class="px-3 py-1 rounded-full text-xs bg-blue-500/15 text-blue-300 border border-blue-500/30"></span>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
-          <div class="p-3.5 rounded-lg bg-slate-950 border border-slate-800">
-            <div class="font-semibold text-amber-300 mb-1">Целевая функция Лагранжа (слайд 27, 30):</div>
-            <div class="mono text-[11px] text-slate-200 leading-relaxed overflow-x-auto">
-              F(Δp₁,…,Δpₙ, λ₁,…,λₘ) = ½ ∑ᵢ₌₁ⁿ wᵢ Δpᵢ² + ∑ⱼ₌₁ᵐ λⱼ fⱼ(p₁+Δp₁,…,pₙ+Δpₙ) → min
-            </div>
-            <div class="mt-2 text-slate-400 text-[11px]">
-              Совпадающие точки используют общую пару координат. Вес wᵢ учитывает количество точек в группе и перетаскивание.
-            </div>
+          <div class="math-card border-amber-500/20">
+            <h3 class="font-semibold text-amber-300">Целевая функция Лагранжа</h3>
+            <div class="math-display" data-tex="\begin{aligned}
+              F(\Delta\mathbf{p},\lambda) &amp;= \frac{1}{2}\sum_{i=1}^{n} w_i(\Delta p_i)^2 \\
+              &amp;\quad + \sum_{j=1}^{m}\lambda_j f_j(\mathbf{p}+\Delta\mathbf{p}) \to \min
+              \end{aligned}"></div>
+            <p class="text-slate-400">Вес <span data-tex="w_i"></span> учитывает количество совпадающих точек и приоритет перетаскивания.</p>
           </div>
 
-          <div class="p-3.5 rounded-lg bg-slate-950 border border-slate-800">
-            <div class="font-semibold text-teal-300 mb-1">Система уравнений (**) и шаг Ньютона (слайды 31–32):</div>
-            <div class="mono text-[11px] text-slate-200 leading-relaxed overflow-x-auto">
-              ∂F/∂λⱼ = fⱼ(p + Δp) = 0, &nbsp; j = 1..m<br/>
-              ∂F/∂Δpᵢ = wᵢ Δpᵢ + ∑ⱼ₌₁ᵐ λⱼ (∂fⱼ / ∂Δpᵢ) = 0, &nbsp; i = 1..n
-            </div>
-            <div class="mt-2 text-slate-400 text-[11px]">
-              Все частные производные ∂fⱼ/∂Δpᵢ и ∂²fⱼ/∂Δpᵢ∂Δpₖ вычисляются строго по аналитическим формулам, зашитым в код.
-            </div>
+          <div class="math-card border-teal-500/20">
+            <h3 class="font-semibold text-teal-300">Уравнения для шага Ньютона</h3>
+            <div class="math-display" data-tex="\begin{aligned}
+              \frac{\partial F}{\partial\lambda_j} &amp;= f_j(\mathbf{p}+\Delta\mathbf{p}) = 0 \\[0.35em]
+              \frac{\partial F}{\partial(\Delta p_i)} &amp;= w_i\,\Delta p_i
+              + \sum_{j=1}^{m}\lambda_j\frac{\partial f_j}{\partial(\Delta p_i)} = 0 \\[0.35em]
+              &amp;\quad i=1,\ldots,n,\qquad j=1,\ldots,m
+              \end{aligned}"></div>
+            <p class="text-slate-400">Первые и вторые производные ограничений вычисляются аналитически.</p>
           </div>
         </div>
       </div>
 
       <!-- Аналитические выражения производных для активных ограничений эскиза -->
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5">
-        <h3 class="text-sm font-bold text-white mb-3">Аналитические выражения уравнений и частных производных активного эскиза</h3>
+        <h3 class="text-sm font-bold text-white mb-1">Уравнения ограничений и частные производные</h3>
+        <p class="text-xs text-slate-400 mb-3">Координаты после поправки
+          <span data-tex="(X_i,Y_i)=(x_i+\Delta x_i,\,y_i+\Delta y_i)"></span>
+        </p>
         <div id="analyticalEquationsTable" class="overflow-x-auto"></div>
       </div>
 
@@ -412,7 +412,7 @@
       <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div>
-            <h3 class="text-sm font-bold text-white">Матрица Якоби СЛАУ A · [Δp, λ]ᵀ = b (решаемая в `CoreAlgo::solve(A, b)`)</h3>
+            <h3 class="text-sm font-bold text-white">Матрица Якоби <span data-tex="A\,[\Delta\mathbf{p},\lambda]^T=b"></span></h3>
             <p class="text-xs text-slate-400">Разреженная матрица после объединения координат совпадающих точек и вектор правой части</p>
           </div>
         </div>

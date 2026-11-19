@@ -20,7 +20,7 @@ export function setActiveTool(toolName) {
     hint.textContent = "Перетаскивайте точки или отрезки мышью — решатель пересчитывает эскиз в реальном времени.";
   } else if (toolName === "point") {
     badge.textContent = "Режим: Создание точки";
-    hint.textContent = "Кликните в любом месте рабочего поля для добавления новой точки P(x, y).";
+    hint.textContent = "Кликните в любом месте рабочего поля, чтобы добавить отдельную точку.";
   } else if (toolName === "segment") {
     badge.textContent = "Режим: Создание отрезка";
     hint.textContent = "Укажите начало и конец отрезка. Клик по существующей точке добавит ограничение совпадения.";
@@ -153,16 +153,16 @@ export function tryApplyConstraintFromSelection(type) {
       const l1 = Math.max(1e-9, Math.hypot(ux, uy)), l2 = Math.max(1e-9, Math.hypot(vx, vy));
       const curAngle = Math.acos(Math.max(-1, Math.min(1, dot / (l1 * l2)))) * 180 / Math.PI;
       openParamModal({
-        title: "Ограничение: Угол между отрезками (α°)",
+        title: "Угол между отрезками",
         desc: `Задайте угол между отрезками ${s1.label} и ${s2.label}:`,
-        label1: "Угол α (в градусах):",
+        label1: "Угол в градусах",
         default1: curAngle || 60
       }, (val) => {
         api.applyRestriction("ANGLE", [s1.p1_id, s1.p2_id, s2.p1_id, s2.p2_id], [s1.id, s2.id], val);
         uiState.selectedSegmentIds = [];
         uiState.activeConstraintTool = null;
         document.querySelectorAll(".constraint-btn").forEach(b => b.classList.remove("active"));
-        showToast(`Наложен угол α = ${val.toFixed(1)}°`);
+        showToast(`Задан угол ${val.toFixed(1)}°`);
         renderAll();
       });
       return true;
@@ -189,10 +189,10 @@ export function tryApplyConstraintFromSelection(type) {
     if (pt) {
       openParamModal({
         title: `Фиксация точки ${pt.label}`,
-        desc: "Задайте координаты фиксации (x_c, y_c):",
-        label1: "Координата X (x_c, мм):",
+        desc: "Задайте координаты фиксации.",
+        label1: "Координата X, мм",
         default1: pt.x,
-        label2: "Координата Y (y_c, мм):",
+        label2: "Координата Y, мм",
         default2: pt.y
       }, (xc, yc) => {
         api.applyRestriction("FIX_POINT", [pt.id], [], xc, yc);
@@ -232,7 +232,7 @@ export function activateConstraintButton(type) {
     PERPENDICULAR: "Кликните последовательно по 2 отрезкам для наложения перпендикулярности.",
     VERTICAL: "Кликните по 1 отрезку (или 2 точкам), чтобы сделать его вертикальным.",
     HORIZONTAL: "Кликните по 1 отрезку (или 2 точкам), чтобы сделать его горизонтальным.",
-    ANGLE: "Кликните последовательно по 2 отрезкам для задания угла α° между ними.",
+    ANGLE: "Выберите два отрезка, чтобы задать угол в градусах.",
     POINT_ON_LINE: "Кликните по 1 точке и по 1 отрезку (в любом порядке).",
     FIX_POINT: "Кликните по точке, которую необходимо зафиксировать в пространстве."
   };

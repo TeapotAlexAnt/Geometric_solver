@@ -30,13 +30,14 @@ function getAllPrimitives() {
   const details = [];
   const { final_residuals: residuals, final_gradients: gradients } = state.solver;
   const restrictions = state.restrictions.map(item => {
-    if (item.type === "COINCIDENT") return { ...item, residual: 0 };
-    const count = RestrictionMeta[item.type].eqs;
+    const { equations } = RestrictionMeta[item.type];
     const row = details.length;
-    const residual = Math.max(...residuals.slice(row, row + count).map(Math.abs), 0);
+    const residual = Math.max(...residuals.slice(row, row + equations.length).map(Math.abs), 0);
     const restriction = { ...item, residual };
-    for (let index = row; index < row + count; index++) {
+    for (const tex of equations) {
+      const index = details.length;
       details.push({
+        tex,
         restriction,
         eqIndex: index + 1,
         f_val: residuals[index],

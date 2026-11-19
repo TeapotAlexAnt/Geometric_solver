@@ -2,6 +2,7 @@ import { api } from "./editor-api.js";
 import { renderSketch } from "./sketch-view.js";
 import { uiState } from "./editor-state.js";
 import { RestrictionMeta } from "./restriction-meta.js";
+import { mathMarkup, numberTex } from "./math.js";
 
 const htmlEntities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
@@ -9,12 +10,18 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, char => htmlEntities[char]);
 }
 
-function formatGradient(gradient, variableLabels) {
-  return gradient.map(([index, value]) => {
-    const axis = index % 2 === 0 ? "x" : "y";
-    const label = escapeHtml(variableLabels[Math.floor(index / 2)]);
-    return `∂f/∂Δ${axis}(${label}) = ${Number(value.toPrecision(5))}`;
-  }).join(", ") || "0";
+function variableTex(index) {
+  const axis = index % 2 === 0 ? "x" : "y";
+  return "\\Delta " + axis + "_{" + (Math.floor(index / 2) + 1) + "}";
+}
+
+function renderGradient(row) {
+  if (!row.df_row.length) return mathMarkup("0");
+  const terms = row.df_row.map(([index, value]) => mathMarkup(
+    "\\frac{\\partial f_{" + row.eqIndex + "}}{\\partial (" + variableTex(index) + ")}="
+    + numberTex(value, 3)
+  ));
+  return '<div class="math-gradient">' + terms.join("") + "</div>";
 }
 
 function formatSketch(json) {
@@ -38,9 +45,10 @@ function updateHeaderStatus() {
 
   document.getElementById("dofValue").textContent = dof;
   document.getElementById("iterValue").textContent = res.iterations || 0;
-  document.getElementById("residualValue").textContent = (res.max_residual || 0).toExponential(2);
+  document.getElementById("residualValue").innerHTML = mathMarkup(numberTex(res.max_residual || 0, 2));
   const dimension = res.last_jacobian.length;
-  document.getElementById("slaeDimBadge").textContent = `${dimension} × ${dimension} (m=${totalEqs}, n=${totalVars})`;
+  document.getElementById("slaeDimBadge").innerHTML =
+    `${dimension} × ${dimension} ${mathMarkup(`(m=${totalEqs},\\; n=${totalVars})`)}`;
 
   const eqBadge = document.getElementById("equilibriumBadge");
   if (res.converged || state.restrictions.length === 0) {
@@ -79,7 +87,7 @@ function describeRestrictionTargets(r) {
     return sLabels.length ? `${sLabels[0]} (${pLabels.join("–")})` : pLabels.join("–");
   }
   if (r.type === "POINT_ON_LINE") {
-    return `${pLabels[0]} ∈ ${sLabels[0] || (pLabels[1] + "–" + pLabels[2])}`;
+    return `${pLabels[0]} на ${sLabels[0] || (pLabels[1] + "–" + pLabels[2])}`;
   }
   if (r.type === "FIX_POINT") {
     return `${pLabels[0]} (${r.value.toFixed(1)}, ${r.value2.toFixed(1)})`;
@@ -124,7 +132,7 @@ function renderRestrictionsBrowser() {
     const resColor = resVal < 1e-3 ? "text-emerald-400" : "text-rose-400";
     targetRow.innerHTML = `
       <span>Объекты: <strong class="text-slate-200 mono">${escapeHtml(describeRestrictionTargets(r))}</strong></span>
-      <span class="mono ${resColor}">|f|=${resVal.toExponential(1)}</span>
+      <span class="${resColor}">${mathMarkup("\\lvert f\\rvert=" + numberTex(resVal, 1))}</span>
     `;
     card.appendChild(targetRow);
 
@@ -132,9 +140,9 @@ function renderRestrictionsBrowser() {
     if (r.type === "DISTANCE" || r.type === "ANGLE") {
       const editRow = document.createElement("div");
       editRow.className = "flex items-center gap-2 mt-0.5 pt-1.5 border-t border-slate-800/80";
-      const unit = r.type === "DISTANCE" ? "мм (d)" : "град (α°)";
+      const parameter = r.type === "DISTANCE" ? "Длина, мм" : "Угол, градусы";
       editRow.innerHTML = `
-        <span class="text-[11px] text-slate-400">Параметр ${unit}:</span>
+        <span class="text-[11px] text-slate-400">${parameter}</span>
         <input type="number" step="any" value="${Number(r.value.toFixed(2))}" data-edit-restriction="${r.id}" class="w-24 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-sky-300 mono text-xs focus:outline-none focus:border-teal-400" />
       `;
       card.appendChild(editRow);
@@ -142,9 +150,9 @@ function renderRestrictionsBrowser() {
       const editRow = document.createElement("div");
       editRow.className = "flex items-center gap-1.5 mt-0.5 pt-1.5 border-t border-slate-800/80 text-[11px]";
       editRow.innerHTML = `
-        <span class="text-slate-400">x_c:</span>
+        <span class="text-slate-400">${mathMarkup("x_c")}</span>
         <input type="number" step="any" value="${Number(r.value.toFixed(1))}" data-edit-fix-x="${r.id}" class="w-16 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-rose-300 mono text-xs" />
-        <span class="text-slate-400">y_c:</span>
+        <span class="text-slate-400">${mathMarkup("y_c")}</span>
         <input type="number" step="any" value="${Number(r.value2.toFixed(1))}" data-edit-fix-y="${r.id}" class="w-16 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-rose-300 mono text-xs" />
       `;
       card.appendChild(editRow);
@@ -182,7 +190,7 @@ function renderPrimitivesBrowser() {
       <div class="p-2 rounded-lg bg-slate-950/90 border border-slate-800 flex items-center justify-between gap-2 text-xs">
         <div>
           <span class="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 mono font-bold mr-1.5">${escapeHtml(s.label)}</span>
-          <span class="mono text-[11px] text-slate-300">${escapeHtml(p1Label)}–${escapeHtml(p2Label)} (L=${len.toFixed(1)} мм)</span>
+          <span class="text-[11px] text-slate-300">${escapeHtml(p1Label)}–${escapeHtml(p2Label)} · ${mathMarkup("L=" + len.toFixed(1))} мм</span>
         </div>
         <button data-remove-primitive="${s.id}" class="px-1.5 py-0.5 rounded bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 text-[11px]">Удалить</button>
       </div>`;
@@ -202,8 +210,8 @@ function renderMatrixInspector() {
   const { totalVars, totalEqs } = state.dofInfo;
   const { variableLabels, eq_details: details, last_jacobian: A, last_rhs: b } = state.solver;
   const merged = state.points.length * 2 - totalVars;
-  document.getElementById("matrixStatsPill").textContent =
-    `n = ${totalVars}, m = ${totalEqs}${merged ? ` · Координат объединено: ${merged}` : ""}`;
+  document.getElementById("matrixStatsPill").innerHTML =
+    `${mathMarkup(`n=${totalVars},\\; m=${totalEqs}`)}${merged ? ` · Объединено координат: ${merged}` : ""}`;
 
   const eqContainer = document.getElementById("analyticalEquationsTable");
   if (details.length === 0) {
@@ -214,11 +222,11 @@ function renderMatrixInspector() {
       const meta = RestrictionMeta[item.restriction.type];
       rowsHtml += `
         <tr class="border-b border-slate-800/80">
-          <td class="py-2 px-3 mono text-amber-300 font-semibold">f_${item.eqIndex}</td>
+          <td class="py-2 px-3 text-amber-300">${mathMarkup(`f_{${item.eqIndex}}`)}</td>
           <td class="py-2 px-3 text-slate-200 font-medium">${meta.name} (${escapeHtml(describeRestrictionTargets(item.restriction))})</td>
-          <td class="py-2 px-3 mono text-slate-300">${meta.formula}</td>
-          <td class="py-2 px-3 mono text-teal-300">${formatGradient(item.df_row, variableLabels)}</td>
-          <td class="py-2 px-3 mono text-right ${Math.abs(item.f_val) < 1e-3 ? 'text-emerald-400' : 'text-rose-400'}">${item.f_val.toExponential(2)}</td>
+          <td class="py-2 px-3 text-slate-200">${mathMarkup(item.tex)}</td>
+          <td class="py-2 px-3 text-teal-200">${renderGradient(item)}</td>
+          <td class="py-2 px-3 text-right ${Math.abs(item.f_val) < 1e-3 ? 'text-emerald-400' : 'text-rose-400'}">${mathMarkup(numberTex(item.f_val, 2))}</td>
         </tr>`;
     }
     eqContainer.innerHTML = `
@@ -227,9 +235,9 @@ function renderMatrixInspector() {
           <tr class="border-b border-slate-700 text-slate-400 bg-slate-950/60">
             <th class="py-2 px-3">Ур.</th>
             <th class="py-2 px-3">Ограничение</th>
-            <th class="py-2 px-3">Аналитическое уравнение f_j = 0</th>
-            <th class="py-2 px-3">Аналитические частные производные ∂f_j/∂Δp_i</th>
-            <th class="py-2 px-3 text-right">Невязка f_j</th>
+            <th class="py-2 px-3">Уравнение ${mathMarkup("f_j=0")}</th>
+            <th class="py-2 px-3">Частные производные ${mathMarkup("\\partial f_j / \\partial(\\Delta p_i)")}</th>
+            <th class="py-2 px-3 text-right">Невязка</th>
           </tr>
         </thead>
         <tbody>${rowsHtml}</tbody>
@@ -243,26 +251,25 @@ function renderMatrixInspector() {
     return;
   }
 
-  const colLabels = [];
-  for (const label of variableLabels) {
-    colLabels.push(`Δx(${label})`);
-    colLabels.push(`Δy(${label})`);
-  }
-  for (let j = 1; j <= totalEqs; j++) {
-    colLabels.push(`λ_${j}`);
-  }
+  const variableCount = variableLabels.length * 2;
+  const colLabels = Array.from({ length: variableCount }, (_, i) => variableTex(i));
+  const multiplier = j => `\\lambda_{${j + 1}}`;
+  for (let j = 0; j < totalEqs; j++) colLabels.push(multiplier(j));
 
   let thead = `<th class="py-1.5 px-2 bg-slate-950 border border-slate-800 text-slate-400">Строка (Ур.)</th>`;
-  for (const lbl of colLabels) {
-    thead += `<th class="py-1.5 px-2 bg-slate-950 border border-slate-800 text-sky-300 text-right">${escapeHtml(lbl)}</th>`;
+  for (const [i, tex] of colLabels.entries()) {
+    const point = i < variableCount ? escapeHtml(variableLabels[Math.floor(i / 2)]) : "";
+    const label = point ? `<span class="math-point-label" title="${point}">${point}</span>` : "";
+    thead += `<th class="py-1.5 px-2 bg-slate-950 border border-slate-800 text-sky-300 text-right">${mathMarkup(tex)}${label}</th>`;
   }
-  thead += `<th class="py-1.5 px-2 bg-slate-950 border border-slate-800 text-amber-300 text-right">Правая часть b</th>`;
+  thead += `<th class="py-1.5 px-2 bg-slate-950 border border-slate-800 text-amber-300 text-right">Правая часть ${mathMarkup("b")}</th>`;
 
   let tbody = "";
   for (let r = 0; r < A.length; r++) {
     const row = new Map(A[r]);
-    const rowLabel = r < totalEqs ? `∂F/∂λ_${r + 1}` : `∂F/∂${colLabels[r - totalEqs]}`;
-    tbody += `<tr><td class="py-1 px-2 border border-slate-800 font-semibold text-slate-300 bg-slate-950/50">${escapeHtml(rowLabel)}</td>`;
+    const variable = r < totalEqs ? multiplier(r) : `(${colLabels[r - totalEqs]})`;
+    const rowLabel = mathMarkup(`\\partial F/\\partial ${variable}`);
+    tbody += `<tr><td class="py-1 px-2 border border-slate-800 text-slate-300 bg-slate-950/50">${rowLabel}</td>`;
     for (let c = 0; c < A.length; c++) {
       const val = row.get(c) ?? 0;
       const isNonZero = Math.abs(val) > 1e-8;

@@ -1,5 +1,6 @@
 import { api } from "./editor-api.js";
 import { uiState } from "./editor-state.js";
+import { mathMarkup } from "./math.js";
 
 const namespace = "http://www.w3.org/2000/svg";
 export const sketch = document.getElementById("cadSketch");
@@ -66,18 +67,35 @@ function label(x, y, text, fill, attributes = {}) {
   return svg("text", { x, y, fill, "font-size": 11, ...attributes }, text);
 }
 
-function badge(x, y, text, border, fill = "#f8fafc", width = 16, height = 16) {
+function badge(x, y, text, border) {
+  const size = 16;
   const group = svg("g", {});
   group.append(
     svg("rect", {
-      x: x - width / 2, y: y - height / 2, width, height,
+      x: x - size / 2, y: y - size / 2, width: size, height: size,
       rx: 4, fill: "#0f172a", "fill-opacity": 0.92, stroke: border, "stroke-width": 1.2
     }),
-    label(x, y + 0.5, text, fill, {
+    label(x, y + 0.5, text, "#f8fafc", {
       "font-weight": 600, "font-size": 10, "text-anchor": "middle", "dominant-baseline": "central"
     })
   );
   return group;
+}
+
+function mathBadge(x, y, tex, border, fill) {
+  const width = 240;
+  const height = 32;
+  const frame = svg("foreignObject", { x: x - width / 2, y: y - height / 2, width, height });
+  const box = document.createElement("div");
+  box.className = "sketch-math-box";
+  const formula = document.createElement("span");
+  formula.className = "sketch-math-badge";
+  formula.style.color = fill;
+  formula.style.borderColor = border;
+  formula.innerHTML = mathMarkup(tex);
+  box.append(formula);
+  frame.append(box);
+  return frame;
 }
 
 export function renderSketch() {
@@ -119,8 +137,8 @@ export function renderSketch() {
       const positions = restriction.p_ids.map(id => screenPoints.get(id));
       const x = positions.reduce((sum, point) => sum + point.x, 0) / positions.length;
       const y = positions.reduce((sum, point) => sum + point.y, 0) / positions.length;
-      const text = `∠ ${restriction.value.toFixed(1)}°`;
-      frame.append(badge(x, y, text, "#ec4899", "#f472b6", text.length * 6 + 10, 18));
+      const tex = String.raw`\alpha=${restriction.value.toFixed(1)}^\circ`;
+      frame.append(mathBadge(x, y, tex, "#ec4899", "#f9a8d4"));
     }
   }
 
@@ -230,13 +248,12 @@ function drawDistance(frame, start, end, distance) {
   const offset = (point, pixels) => ({ x: point.x + nx * pixels, y: point.y + ny * pixels });
   const first = offset(start, 24);
   const second = offset(end, 24);
-  const text = `d = ${distance.toFixed(1)}`;
+  const tex = `d=${distance.toFixed(1)}`;
 
   frame.append(
     line(start, offset(start, 28), "#38bdf873"),
     line(end, offset(end, 28), "#38bdf873"),
     line(first, second, "#38bdf8", 1.4),
-    badge((first.x + second.x) / 2, (first.y + second.y) / 2,
-      text, "#0284c7", "#7dd3fc", text.length * 6 + 10, 18)
+    mathBadge((first.x + second.x) / 2, (first.y + second.y) / 2, tex, "#0284c7", "#7dd3fc")
   );
 }
