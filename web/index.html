@@ -382,10 +382,10 @@
           <div class="p-3.5 rounded-lg bg-slate-950 border border-slate-800">
             <div class="font-semibold text-amber-300 mb-1">Целевая функция Лагранжа (слайд 27, 30):</div>
             <div class="mono text-[11px] text-slate-200 leading-relaxed overflow-x-auto">
-              F(Δp₁,…,Δpₙ, λ₁,…,λₘ) = ½ ∑ᵢ₌₁ⁿ Δpᵢ² + ∑ⱼ₌₁ᵐ λⱼ fⱼ(p₁+Δp₁,…,pₙ+Δpₙ) → min
+              F(Δp₁,…,Δpₙ, λ₁,…,λₘ) = ½ ∑ᵢ₌₁ⁿ wᵢ Δpᵢ² + ∑ⱼ₌₁ᵐ λⱼ fⱼ(p₁+Δp₁,…,pₙ+Δpₙ) → min
             </div>
             <div class="mt-2 text-slate-400 text-[11px]">
-              Принцип наименьших изменений гарантирует однозначное решение даже для недоопределенных эскизов (при перетаскивании узлов мышью).
+              Совпадающие точки используют общую пару координат. Вес wᵢ учитывает количество точек в группе и перетаскивание.
             </div>
           </div>
 
@@ -393,7 +393,7 @@
             <div class="font-semibold text-teal-300 mb-1">Система уравнений (**) и шаг Ньютона (слайды 31–32):</div>
             <div class="mono text-[11px] text-slate-200 leading-relaxed overflow-x-auto">
               ∂F/∂λⱼ = fⱼ(p + Δp) = 0, &nbsp; j = 1..m<br/>
-              ∂F/∂Δpᵢ = Δpᵢ + ∑ⱼ₌₁ᵐ λⱼ (∂fⱼ / ∂Δpᵢ) = 0, &nbsp; i = 1..n
+              ∂F/∂Δpᵢ = wᵢ Δpᵢ + ∑ⱼ₌₁ᵐ λⱼ (∂fⱼ / ∂Δpᵢ) = 0, &nbsp; i = 1..n
             </div>
             <div class="mt-2 text-slate-400 text-[11px]">
               Все частные производные ∂fⱼ/∂Δpᵢ и ∂²fⱼ/∂Δpᵢ∂Δpₖ вычисляются строго по аналитическим формулам, зашитым в код.
@@ -413,7 +413,7 @@
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div>
             <h3 class="text-sm font-bold text-white">Матрица Якоби СЛАУ A · [Δp, λ]ᵀ = b (решаемая в `CoreAlgo::solve(A, b)`)</h3>
-            <p class="text-xs text-slate-400">Полная блочная матрица ККТ/Якоби размера (m + n) × (m + n) и вектор правой части</p>
+            <p class="text-xs text-slate-400">Разреженная матрица после объединения координат совпадающих точек и вектор правой части</p>
           </div>
         </div>
         <div id="jacobianMatrixContainer" class="overflow-x-auto"></div>

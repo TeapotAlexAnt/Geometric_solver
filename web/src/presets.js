@@ -6,7 +6,7 @@ function loadPreset(sketch, message) {
   api.loadSketch(sketch);
   uiState.selectedPointIds = [];
   uiState.selectedSegmentIds = [];
-  uiState.segmentStartPointId = null;
+  uiState.segmentStart = null;
   renderAll();
   showToast(message);
 }

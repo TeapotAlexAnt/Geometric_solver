@@ -37,21 +37,14 @@ std::string Restriction::typeName() const {
     return "UNKNOWN";
 }
 
-void Restriction::evaluateAnalytical(
-    const std::vector<double>& X, // текущие координаты X_i = p_i + dp_i
-    const std::unordered_map<int, int>&
-        pointIdToVarIdx,        // point_id -> индекс x в векторе X (y имеет индекс +1)
-    std::vector<double>& f_out, // значения уравнений (1 или 2 шт.)
-    std::vector<std::vector<double>>&
-        df_out, // градиенты каждого уравнения по вектору параметров (размер eqCount x nVars)
-    std::vector<std::vector<std::vector<double>>>&
-        d2f_out // гессианы каждого уравнения (размер eqCount x nVars x nVars)
-) const {
-    int nVars = static_cast<int>(X.size());
+void Restriction::evaluateAnalytical(const std::vector<double>& X,
+                                     const std::unordered_map<int, int>& pointIdToVarIdx,
+                                     std::vector<double>& f_out, SparseMatrix& df_out,
+                                     std::vector<std::map<int, SparseRow>>& d2f_out) const {
     int eqs = equationCount();
     f_out.assign(eqs, 0.0);
-    df_out.assign(eqs, std::vector<double>(nVars, 0.0));
-    d2f_out.assign(eqs, std::vector<std::vector<double>>(nVars, std::vector<double>(nVars, 0.0)));
+    df_out.assign(eqs, {});
+    d2f_out.assign(eqs, {});
 
     auto idxX = [&](int pid) -> int { return pointIdToVarIdx.at(pid); };
     auto idxY = [&](int pid) -> int { return pointIdToVarIdx.at(pid) + 1; };
@@ -65,12 +58,12 @@ void Restriction::evaluateAnalytical(
         int ix2 = idxX(p_ids[1]), iy2 = idxY(p_ids[1]);
 
         f_out[0] = X[ix2] - X[ix1];
-        df_out[0][ix1] = -1.0;
-        df_out[0][ix2] = 1.0;
+        df_out[0][ix1] -= 1.0;
+        df_out[0][ix2] += 1.0;
 
         f_out[1] = X[iy2] - X[iy1];
-        df_out[1][iy1] = -1.0;
-        df_out[1][iy2] = 1.0;
+        df_out[1][iy1] -= 1.0;
+        df_out[1][iy2] += 1.0;
         break;
     }
 
@@ -86,10 +79,10 @@ void Restriction::evaluateAnalytical(
         f_out[0] = dx * dx + dy * dy - d * d;
 
         // Аналитические первые производные:
-        df_out[0][ix1] = -2.0 * dx;
-        df_out[0][iy1] = -2.0 * dy;
-        df_out[0][ix2] = 2.0 * dx;
-        df_out[0][iy2] = 2.0 * dy;
+        df_out[0][ix1] -= 2.0 * dx;
+        df_out[0][iy1] -= 2.0 * dy;
+        df_out[0][ix2] += 2.0 * dx;
+        df_out[0][iy2] += 2.0 * dy;
 
         // Аналитические вторые производные (матрица Якоби для системы Лагранжа (**)):
         d2f_out[0][ix1][ix1] += 2.0;
@@ -194,8 +187,8 @@ void Restriction::evaluateAnalytical(
         int ix1 = idxX(p_ids[0]);
         int ix2 = idxX(p_ids[1]);
         f_out[0] = X[ix2] - X[ix1];
-        df_out[0][ix1] = -1.0;
-        df_out[0][ix2] = 1.0;
+        df_out[0][ix1] -= 1.0;
+        df_out[0][ix2] += 1.0;
         break;
     }
 
@@ -205,8 +198,8 @@ void Restriction::evaluateAnalytical(
         int iy1 = idxY(p_ids[0]);
         int iy2 = idxY(p_ids[1]);
         f_out[0] = X[iy2] - X[iy1];
-        df_out[0][iy1] = -1.0;
-        df_out[0][iy2] = 1.0;
+        df_out[0][iy1] -= 1.0;
+        df_out[0][iy2] += 1.0;
         break;
     }
 
@@ -356,6 +349,14 @@ void Restriction::evaluateAnalytical(
         df_out[1][iy] = 1.0;
         break;
     }
+    }
+    for (auto& gradient : df_out) {
+        for (auto it = gradient.begin(); it != gradient.end();) {
+            if (it->second == 0.0)
+                it = gradient.erase(it);
+            else
+                ++it;
+        }
     }
 }
 

@@ -26,9 +26,11 @@ void writeJsonString(std::ostream& out, const std::string& value) {
 std::string PointFigure::toJson() const {
     std::ostringstream ss;
     ss << std::setprecision(std::numeric_limits<double>::max_digits10);
-    ss << "{\"id\":" << id << ",\"type\":\"point\",\"label\":";
+    ss << "{\"id\":" << id << ",\"type\":\"" << (segment_id ? "endpoint" : "point") << "\",\"label\":";
     writeJsonString(ss, label);
-    ss << ",\"x\":" << x << ",\"y\":" << y << "}";
+    ss << ",\"x\":" << x << ",\"y\":" << y;
+    if (segment_id) ss << ",\"segment_id\":" << segment_id;
+    ss << '}';
     return ss.str();
 }
 

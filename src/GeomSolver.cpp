@@ -1,81 +1,81 @@
 #include "GeomSolver.hpp"
+#include "HelperFunctions.hpp"
+#include <iterator>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace cad {
 
 OptimizeResult GeomSolver::solve(GeomRepository& repo, const std::vector<Restriction>& extra_restrictions,
                                  const std::vector<int>& dragged_point_ids) {
-    int nPoints = static_cast<int>(repo.points.size());
-    int nVars = nPoints * 2;
-    std::vector<double> initial_params(nVars, 0.0);
-    std::vector<double> variable_weights(nVars, 1.0);
+    const auto groups = HelperFunctions::groupCoincidentPoints(repo, extra_restrictions);
+    const std::unordered_set<int> dragged(dragged_point_ids.begin(), dragged_point_ids.end());
     std::unordered_map<int, int> pointIdToVarIdx;
+    std::vector<double> initial_params;
+    std::vector<double> variable_weights;
+    std::vector<std::vector<int>> point_groups;
 
-    for (int i = 0; i < nPoints; ++i) {
-        pointIdToVarIdx[repo.points[i]->id] = i * 2;
-        initial_params[i * 2] = repo.points[i]->x;
-        initial_params[i * 2 + 1] = repo.points[i]->y;
-    }
-
-    for (int id : dragged_point_ids) {
-        int i = pointIdToVarIdx.at(id);
-        variable_weights[i] = variable_weights[i + 1] = 25.0;
-    }
-
-    // Объединяем основные ограничения репозитория и дополнительные (например, при перетаскивании курсором)
-    std::vector<Restriction> all_restrictions = repo.restrictions;
-    for (const auto& er : extra_restrictions) {
-        all_restrictions.push_back(er);
-    }
-
-    int total_eqs = 0;
-    for (const auto& r : all_restrictions) {
-        total_eqs += r.equationCount();
-    }
-
-    if (nVars == 0 || total_eqs == 0) {
-        OptimizeResult empty_res;
-        empty_res.converged = true;
-        empty_res.iterations = 0;
-        empty_res.max_delta = 0.0;
-        empty_res.max_residual = 0.0;
-        empty_res.final_params = initial_params;
-        return empty_res;
-    }
-
-    auto eval_callback = [&](const std::vector<double>& X, std::vector<double>& f_vec,
-                             std::vector<std::vector<double>>& J_f,
-                             std::vector<std::vector<std::vector<double>>>& H_f) {
-        f_vec.assign(total_eqs, 0.0);
-        J_f.assign(total_eqs, std::vector<double>(nVars, 0.0));
-        H_f.assign(total_eqs, std::vector<std::vector<double>>(nVars, std::vector<double>(nVars, 0.0)));
-
-        int row = 0;
-        for (const auto& r : all_restrictions) {
-            std::vector<double> f_loc;
-            std::vector<std::vector<double>> df_loc;
-            std::vector<std::vector<std::vector<double>>> d2f_loc;
-            r.evaluateAnalytical(X, pointIdToVarIdx, f_loc, df_loc, d2f_loc);
-
-            for (size_t k = 0; k < f_loc.size(); ++k) {
-                f_vec[row] = f_loc[k];
-                J_f[row] = df_loc[k];
-                H_f[row] = d2f_loc[k];
-                ++row;
+    for (const auto& group : groups) {
+        const int x_index = static_cast<int>(initial_params.size());
+        auto& ids = point_groups.emplace_back();
+        double x = 0.0, y = 0.0;
+        double drag_x = 0.0, drag_y = 0.0;
+        int count = 0, drag_count = 0;
+        for (const auto* point : group) {
+            pointIdToVarIdx.emplace(point->id, x_index);
+            ids.push_back(point->id);
+            ++count;
+            x += point->x / count - x / count;
+            y += point->y / count - y / count;
+            if (dragged.count(point->id)) {
+                ++drag_count;
+                drag_x += point->x / drag_count - drag_x / drag_count;
+                drag_y += point->y / drag_count - drag_y / drag_count;
             }
+        }
+        // При перетаскивании всей группы следует за курсором её перемещаемая точка.
+        initial_params.insert(initial_params.end(), {drag_count ? drag_x : x, drag_count ? drag_y : y});
+        const double weight = count + 24.0 * drag_count;
+        variable_weights.insert(variable_weights.end(), {weight, weight});
+    }
+
+    std::vector<const Restriction*> equations;
+    int total_eqs = 0;
+    const auto collect = [&](const std::vector<Restriction>& restrictions) {
+        for (const auto& restriction : restrictions) {
+            if (restriction.type == RestrictionType::COINCIDENT) continue;
+            equations.push_back(&restriction);
+            total_eqs += restriction.equationCount();
+        }
+    };
+    collect(repo.restrictions);
+    collect(extra_restrictions);
+
+    auto evaluate = [&](const std::vector<double>& params, std::vector<double>& residuals,
+                        SparseMatrix& gradients) {
+        residuals.reserve(total_eqs);
+        gradients.reserve(total_eqs);
+        std::vector<double> local_residuals;
+        SparseMatrix local_gradients;
+        std::vector<std::map<int, SparseRow>> hessians;
+        for (const auto* restriction : equations) {
+            restriction->evaluateAnalytical(params, pointIdToVarIdx, local_residuals, local_gradients,
+                                            hessians);
+            residuals.insert(residuals.end(), local_residuals.begin(), local_residuals.end());
+            gradients.insert(gradients.end(), std::make_move_iterator(local_gradients.begin()),
+                             std::make_move_iterator(local_gradients.end()));
         }
     };
 
-    OptimizeResult res =
-        CoreAlgo::optimize(eval_callback, initial_params, total_eqs, 60, 1e-6, variable_weights);
-
-    // Обновляем координаты точек в GeomRepository (new_geom)
-    for (int i = 0; i < nPoints; ++i) {
-        repo.points[i]->x = res.final_params[i * 2];
-        repo.points[i]->y = res.final_params[i * 2 + 1];
+    auto result = CoreAlgo::optimize(evaluate, initial_params, total_eqs, 60, 1e-6, variable_weights);
+    result.point_groups = std::move(point_groups);
+    // Даже без уравнений Лагранжа совпадение должно обновить координаты всех точек группы.
+    for (auto& point : repo.points) {
+        const int i = pointIdToVarIdx.at(point->id);
+        point->x = result.final_params[i];
+        point->y = result.final_params[i + 1];
     }
-    repo.relinkSegments();
-    return res;
+    return result;
 }
 
 } // namespace cad

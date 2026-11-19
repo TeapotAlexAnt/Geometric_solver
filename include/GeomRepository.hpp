@@ -26,6 +26,10 @@ class GeomRepository {
 
     std::shared_ptr<SegmentFigure> addSegment(int p1_id, int p2_id, const std::string& label = "");
 
+    std::shared_ptr<SegmentFigure> addSegment(double x1, double y1, double x2, double y2,
+                                              const std::string& label = "", int snap_start = 0,
+                                              int snap_end = 0);
+
     int addRestriction(const Restriction& r);
 
     bool removeRestriction(int rid);
@@ -37,8 +41,6 @@ class GeomRepository {
     SegmentFigure* findSegment(int id) const;
 
     bool isValidRestriction(const Restriction& r) const;
-
-    void relinkSegments();
 
     // Serializer JSON (соответствует фиолетовой стрелке serializer -> JSON на схеме бригады)
     void writeJsonFields(std::ostream& out) const;

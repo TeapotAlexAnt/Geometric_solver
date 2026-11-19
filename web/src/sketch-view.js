@@ -124,15 +124,23 @@ export function renderSketch() {
     }
   }
 
-  const segmentStart = screenPoints.get(uiState.segmentStartPointId);
+  const pending = uiState.segmentStart;
+  const segmentStart = pending?.id ? points.find(point => point.id === pending.id) : pending;
   if (uiState.activeTool === "segment" && segmentStart) {
-    frame.append(line(segmentStart, worldToScreen(uiState.mouseWorld), "#38bdf8", 2, {
+    const previewEnd = points.find(point => point.id === uiState.hoveredPointId) ?? uiState.mouseWorld;
+    frame.append(line(worldToScreen(segmentStart), worldToScreen(previewEnd), "#38bdf8", 2, {
       "stroke-dasharray": "6 4", "data-segment-preview": ""
     }));
   }
 
   for (const segment of segments) drawSegment(frame, segment, screenPoints, restrictions);
-  for (const point of points) drawPoint(frame, point, screenPoints.get(point.id), restrictions);
+  const labelOffsets = new Map();
+  for (const point of points) {
+    const key = `${point.x},${point.y}`;
+    const offset = labelOffsets.get(key) ?? 0;
+    drawPoint(frame, point, screenPoints.get(point.id), restrictions, offset);
+    labelOffsets.set(key, offset + 13);
+  }
   geometry.replaceChildren(frame);
 }
 
@@ -179,7 +187,7 @@ function drawSegment(frame, segment, screenPoints, restrictions) {
   frame.append(group);
 }
 
-function drawPoint(frame, point, position, restrictions) {
+function drawPoint(frame, point, position, restrictions, labelOffset) {
   const { x, y } = position;
   const selected = uiState.selectedPointIds.includes(point.id);
   const hovered = uiState.hoveredPointId === point.id;
@@ -187,7 +195,7 @@ function drawPoint(frame, point, position, restrictions) {
   const coincident = restrictions.some(r => r.type === "COINCIDENT" && r.p_ids.includes(point.id));
   const onLine = restrictions.some(r => r.type === "POINT_ON_LINE" && r.p_ids[0] === point.id);
   const group = svg("g", {
-    "data-primitive-id": point.id, "data-primitive-type": "point", "data-selected": selected
+    "data-primitive-id": point.id, "data-primitive-type": point.type, "data-selected": selected
   });
 
   if (selected || hovered) {
@@ -196,12 +204,14 @@ function drawPoint(frame, point, position, restrictions) {
   if (coincident) {
     group.append(svg("circle", { cx: x, cy: y, r: 8.5, fill: "none", stroke: "#fbbf24", "stroke-width": 1.8 }));
   }
+  const endpoint = point.type === "endpoint";
+  const fill = fixed ? "#f43f5e" : selected ? "#38bdf8" : endpoint ? "#a5b4fc" : "#f8fafc";
+  const marker = { fill, stroke: "#0f172a", "stroke-width": 2 };
   group.append(
-    svg("circle", {
-      cx: x, cy: y, r: 5.5, fill: fixed ? "#f43f5e" : (selected ? "#38bdf8" : "#f8fafc"),
-      stroke: "#0f172a", "stroke-width": 2
-    }),
-    label(x + 8, y - 8, `${point.label}(${point.x.toFixed(0)},${point.y.toFixed(0)})`,
+    endpoint
+      ? svg("rect", { x: x - 5, y: y - 5, width: 10, height: 10, rx: 1, ...marker })
+      : svg("circle", { cx: x, cy: y, r: 5.5, ...marker }),
+    label(x + 8, y - 8 - labelOffset, `${point.label}(${point.x.toFixed(0)},${point.y.toFixed(0)})`,
       selected ? "#38bdf8" : "#cbd5e1", { "font-weight": 600 })
   );
   if (fixed) group.append(badge(x - 14, y + 14, "🔒", "#f43f5e"));

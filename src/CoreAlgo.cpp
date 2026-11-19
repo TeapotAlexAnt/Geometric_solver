@@ -4,45 +4,43 @@
 
 namespace cad {
 
-std::vector<double> CoreAlgo::solve(std::vector<std::vector<double>> A, std::vector<double> b) {
+std::vector<double> CoreAlgo::solve(SparseMatrix A, std::vector<double> b) {
     int n = static_cast<int>(b.size());
     if (n == 0) return {};
 
     // Прямой ход метода Гаусса с частичным выбором главного элемента (partial pivoting)
     for (int k = 0; k < n; ++k) {
         int max_row = k;
-        double max_val = std::fabs(A[k][k]);
-        for (int i = k + 1; i < n; ++i) {
-            double v = std::fabs(A[i][k]);
-            if (v > max_val) {
-                max_val = v;
+        double max_val = 0.0;
+        for (int i = k; i < n; ++i) {
+            const auto entry = A[i].find(k);
+            if (entry != A[i].end() && std::fabs(entry->second) > max_val) {
+                max_val = std::fabs(entry->second);
                 max_row = i;
             }
         }
 
         // Перестановка строк, если найден больший ведущий элемент
         if (max_row != k) {
-            std::vector<double> tmp_row = A[k];
-            A[k] = A[max_row];
-            A[max_row] = tmp_row;
-
-            double tmp_b = b[k];
-            b[k] = b[max_row];
-            b[max_row] = tmp_b;
+            std::swap(A[k], A[max_row]);
+            std::swap(b[k], b[max_row]);
         }
 
         // Регуляризация Тихонова на случай вырожденной / переопределенной системы ограничений
-        if (std::fabs(A[k][k]) < 1e-11) {
-            A[k][k] = (A[k][k] >= 0.0 ? 1e-11 : -1e-11);
-        }
+        double& pivot = A[k][k];
+        if (std::fabs(pivot) < 1e-11) pivot = std::copysign(1e-11, pivot);
 
-        double pivot = A[k][k];
         for (int i = k + 1; i < n; ++i) {
-            double factor = A[i][k] / pivot;
+            auto entry = A[i].find(k);
+            if (entry == A[i].end()) continue;
+            double factor = entry->second / pivot;
+            A[i].erase(entry);
             if (std::fabs(factor) < 1e-16) continue;
-            A[i][k] = 0.0;
-            for (int j = k + 1; j < n; ++j) {
-                A[i][j] -= factor * A[k][j];
+            for (auto it = A[k].upper_bound(k); it != A[k].end(); ++it) {
+                const auto [column, value] = *it;
+                auto& coefficient = A[i][column];
+                coefficient -= factor * value;
+                if (coefficient == 0.0) A[i].erase(column);
             }
             b[i] -= factor * b[k];
         }
@@ -52,15 +50,10 @@ std::vector<double> CoreAlgo::solve(std::vector<std::vector<double>> A, std::vec
     std::vector<double> x(n, 0.0);
     for (int i = n - 1; i >= 0; --i) {
         double sum = b[i];
-        for (int j = i + 1; j < n; ++j) {
-            sum -= A[i][j] * x[j];
+        for (auto it = A[i].upper_bound(i); it != A[i].end(); ++it) {
+            sum -= it->second * x[it->first];
         }
-        double diag = A[i][i];
-        if (std::fabs(diag) < 1e-12) {
-            x[i] = 0.0;
-        } else {
-            x[i] = sum / diag;
-        }
+        x[i] = sum / A[i].at(i);
     }
     return x;
 }
@@ -70,10 +63,6 @@ OptimizeResult CoreAlgo::optimize(EvalCallback eval_f_df, const std::vector<doub
                                   const std::vector<double>& variable_weights) {
     OptimizeResult res;
     res.final_params = initial_params;
-    res.converged = true;
-    res.iterations = 0;
-    res.max_delta = 0.0;
-    res.max_residual = 0.0;
 
     int n = static_cast<int>(initial_params.size());
     int m = num_equations;
@@ -90,9 +79,8 @@ OptimizeResult CoreAlgo::optimize(EvalCallback eval_f_df, const std::vector<doub
         res.iterations = iter + 1;
 
         std::vector<double> f_vec;
-        std::vector<std::vector<double>> J_f;
-        std::vector<std::vector<std::vector<double>>> H_f;
-        eval_f_df(p, f_vec, J_f, H_f);
+        SparseMatrix J_f;
+        eval_f_df(p, f_vec, J_f);
 
         double max_f = 0.0;
         for (int j = 0; j < m; ++j) {
@@ -110,14 +98,15 @@ OptimizeResult CoreAlgo::optimize(EvalCallback eval_f_df, const std::vector<doub
         // Уравнения 0..m-1 (dF/dlambda_j = 0):
         //   sum_i (df_j / d(dp_i)) * dp_i + 0 * lambda = -f_j(p)
         // Уравнения m..m+n-1 (dF/d(dp_i) = 0):
-        //   (1 + mu) * dp_i + sum_j (df_j / d(dp_i)) * lambda_j = 0
-        std::vector<std::vector<double>> A(total_dim, std::vector<double>(total_dim, 0.0));
+        //   w_i * dp_i + sum_j (df_j / d(dp_i)) * lambda_j = 0
+        SparseMatrix A(total_dim);
         std::vector<double> b(total_dim, 0.0);
 
         // Верхний блок (m строк): уравнения ограничений dF/dlambda_j = f_j(p + dp) = 0
         for (int j = 0; j < m; ++j) {
-            for (int i = 0; i < n; ++i) {
-                A[j][i] = J_f[j][i];
+            for (const auto& [i, value] : J_f[j]) {
+                A[j].emplace(i, value);
+                A[m + i].emplace(n + j, value);
             }
             // Слабая регуляризация диагонали множителей Лагранжа для устойчивости при зависимых ограничениях
             A[j][n + j] = -1e-9;
@@ -128,11 +117,6 @@ OptimizeResult CoreAlgo::optimize(EvalCallback eval_f_df, const std::vector<doub
         // df_j/ddp_i = 0
         for (int i = 0; i < n; ++i) {
             A[m + i][i] = variable_weights.empty() ? 1.0 : variable_weights[i];
-            // Перетаскивание увеличивает вес координат, следующих за курсором.
-            for (int j = 0; j < m; ++j) {
-                A[m + i][n + j] = J_f[j][i];
-            }
-            b[m + i] = 0.0;
         }
 
         if (iter == 0) {
@@ -141,7 +125,7 @@ OptimizeResult CoreAlgo::optimize(EvalCallback eval_f_df, const std::vector<doub
         }
 
         // Решаем СЛАУ собственным методом Гаусса CoreAlgo::solve(A, b)
-        std::vector<double> sol = CoreAlgo::solve(A, b);
+        std::vector<double> sol = CoreAlgo::solve(std::move(A), std::move(b));
         if (iter == 0) res.last_solution = sol;
 
         // Ограничение максимального шага (damping) для глобальной сходимости сильно нелинейных ограничений
@@ -179,9 +163,8 @@ OptimizeResult CoreAlgo::optimize(EvalCallback eval_f_df, const std::vector<doub
 
     // Финальная проверка невязки
     std::vector<double> f_final;
-    std::vector<std::vector<double>> J_final;
-    std::vector<std::vector<std::vector<double>>> H_final;
-    eval_f_df(p, f_final, J_final, H_final);
+    SparseMatrix J_final;
+    eval_f_df(p, f_final, J_final);
     double max_f_final = 0.0;
     for (double val : f_final) {
         if (std::fabs(val) > max_f_final) max_f_final = std::fabs(val);

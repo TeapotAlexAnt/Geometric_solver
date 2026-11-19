@@ -9,13 +9,12 @@ function escapeHtml(text) {
   return text.replace(/[&<>"']/g, char => htmlEntities[char]);
 }
 
-function formatGradient(gradient, points) {
-  return gradient.map((value, index) => {
-    if (value === 0) return null;
+function formatGradient(gradient, variableLabels) {
+  return gradient.map(([index, value]) => {
     const axis = index % 2 === 0 ? "x" : "y";
-    const label = escapeHtml(points[Math.floor(index / 2)].label);
+    const label = escapeHtml(variableLabels[Math.floor(index / 2)]);
     return `∂f/∂Δ${axis}(${label}) = ${Number(value.toPrecision(5))}`;
-  }).filter(Boolean).join(", ") || "0";
+  }).join(", ") || "0";
 }
 
 function formatSketch(json) {
@@ -28,7 +27,7 @@ export function renderAll() {
   renderRestrictionsBrowser();
   renderPrimitivesBrowser();
   updateJsonPanel();
-  renderMatrixInspector();
+  if (!document.getElementById("viewMatrix").classList.contains("hidden")) renderMatrixInspector();
   updateSelectionBadge();
 }
 
@@ -40,7 +39,8 @@ function updateHeaderStatus() {
   document.getElementById("dofValue").textContent = dof;
   document.getElementById("iterValue").textContent = res.iterations || 0;
   document.getElementById("residualValue").textContent = (res.max_residual || 0).toExponential(2);
-  document.getElementById("slaeDimBadge").textContent = `${totalEqs + totalVars} × ${totalEqs + totalVars} (m=${totalEqs}, n=${totalVars})`;
+  const dimension = res.last_jacobian.length;
+  document.getElementById("slaeDimBadge").textContent = `${dimension} × ${dimension} (m=${totalEqs}, n=${totalVars})`;
 
   const eqBadge = document.getElementById("equilibriumBadge");
   if (res.converged || state.restrictions.length === 0) {
@@ -63,7 +63,7 @@ function updateHeaderStatus() {
   }
 
   document.getElementById("countRestrictions").textContent = state.restrictions.length;
-  document.getElementById("countPrimitives").textContent = state.points.length + state.segments.length;
+  document.getElementById("countPrimitives").textContent = state.standalonePoints.length + state.segments.length;
 }
 
 function describeRestrictionTargets(r) {
@@ -156,7 +156,7 @@ function renderRestrictionsBrowser() {
 
 function renderPrimitivesBrowser() {
   const listEl = document.getElementById("primitivesList");
-  const pts = api.getAllPrimitives().points;
+  const pts = api.getAllPrimitives().standalonePoints;
   const segs = api.getAllPrimitives().segments;
   if (pts.length === 0 && segs.length === 0) {
     listEl.innerHTML = `<div class="p-4 rounded-lg bg-slate-950/60 border border-slate-800 text-center text-xs text-slate-400">Эскиз пуст. Создайте точки или отрезки.</div>`;
@@ -200,13 +200,14 @@ function updateJsonPanel() {
 function renderMatrixInspector() {
   const state = api.getAllPrimitives();
   const { totalVars, totalEqs } = state.dofInfo;
+  const { variableLabels, eq_details: details, last_jacobian: A, last_rhs: b } = state.solver;
+  const merged = state.points.length * 2 - totalVars;
   document.getElementById("matrixStatsPill").textContent =
-    `n = ${totalVars} параметров (${state.points.length} точек), m = ${totalEqs} уравнений ограничений`;
+    `n = ${totalVars}, m = ${totalEqs}${merged ? ` · Координат объединено: ${merged}` : ""}`;
 
   const eqContainer = document.getElementById("analyticalEquationsTable");
-  const details = state.solver.eq_details;
   if (details.length === 0) {
-    eqContainer.innerHTML = `<div class="text-xs text-slate-400 p-3">Нет активных уравнений ограничений. Добавьте ограничения на рабочем поле.</div>`;
+    eqContainer.innerHTML = `<div class="text-xs text-slate-400 p-3">Нет активных уравнений системы Лагранжа.</div>`;
   } else {
     let rowsHtml = "";
     for (const item of details) {
@@ -216,7 +217,7 @@ function renderMatrixInspector() {
           <td class="py-2 px-3 mono text-amber-300 font-semibold">f_${item.eqIndex}</td>
           <td class="py-2 px-3 text-slate-200 font-medium">${meta.name} (${escapeHtml(describeRestrictionTargets(item.restriction))})</td>
           <td class="py-2 px-3 mono text-slate-300">${meta.formula}</td>
-          <td class="py-2 px-3 mono text-teal-300">${formatGradient(item.df_row, state.points)}</td>
+          <td class="py-2 px-3 mono text-teal-300">${formatGradient(item.df_row, variableLabels)}</td>
           <td class="py-2 px-3 mono text-right ${Math.abs(item.f_val) < 1e-3 ? 'text-emerald-400' : 'text-rose-400'}">${item.f_val.toExponential(2)}</td>
         </tr>`;
     }
@@ -237,17 +238,15 @@ function renderMatrixInspector() {
 
   // Отрисовка матрицы СЛАУ A и правой части b
   const matContainer = document.getElementById("jacobianMatrixContainer");
-  const A = state.solver.last_jacobian || [];
-  const b = state.solver.last_rhs || [];
   if (A.length === 0) {
-    matContainer.innerHTML = `<div class="text-xs text-slate-400 p-3">Матрица СЛАУ пуста (нет активных ограничений).</div>`;
+    matContainer.innerHTML = `<div class="text-xs text-slate-400 p-3">Для текущих ограничений решать СЛАУ не требуется.</div>`;
     return;
   }
 
   const colLabels = [];
-  for (const pt of state.points) {
-    colLabels.push(`Δx(${pt.label})`);
-    colLabels.push(`Δy(${pt.label})`);
+  for (const label of variableLabels) {
+    colLabels.push(`Δx(${label})`);
+    colLabels.push(`Δy(${label})`);
   }
   for (let j = 1; j <= totalEqs; j++) {
     colLabels.push(`λ_${j}`);
@@ -261,10 +260,11 @@ function renderMatrixInspector() {
 
   let tbody = "";
   for (let r = 0; r < A.length; r++) {
+    const row = new Map(A[r]);
     const rowLabel = r < totalEqs ? `∂F/∂λ_${r + 1}` : `∂F/∂${colLabels[r - totalEqs]}`;
     tbody += `<tr><td class="py-1 px-2 border border-slate-800 font-semibold text-slate-300 bg-slate-950/50">${escapeHtml(rowLabel)}</td>`;
-    for (let c = 0; c < A[r].length; c++) {
-      const val = A[r][c];
+    for (let c = 0; c < A.length; c++) {
+      const val = row.get(c) ?? 0;
       const isNonZero = Math.abs(val) > 1e-8;
       const cellClass = isNonZero ? "text-emerald-300 font-semibold bg-emerald-950/20" : "text-slate-600";
       tbody += `<td class="py-1 px-2 border border-slate-800 text-right ${cellClass}">${isNonZero ? val.toFixed(2) : "0"}</td>`;

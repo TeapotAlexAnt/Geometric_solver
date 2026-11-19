@@ -4,7 +4,7 @@
 
 namespace cad {
 
-enum class FigureType { POINT, SEGMENT };
+enum class FigureType { POINT, SEGMENT, ENDPOINT };
 
 /**
  * Базовый класс геометрического примитива эскиза (Figure)
@@ -34,10 +34,12 @@ class PointFigure : public Figure {
   public:
     double x;
     double y;
+    int segment_id;
 
-    PointFigure(int id_, double x_, double y_, const std::string& label_ = "")
-        : Figure(id_, FigureType::POINT, label_.empty() ? ("P" + std::to_string(id_)) : label_), x(x_),
-          y(y_) {}
+    PointFigure(int id_, double x_, double y_, const std::string& label_ = "", int segment_id_ = 0)
+        : Figure(id_, segment_id_ ? FigureType::ENDPOINT : FigureType::POINT,
+                 label_.empty() ? ("P" + std::to_string(id_)) : label_),
+          x(x_), y(y_), segment_id(segment_id_) {}
 
     std::vector<double*> params() override { return {&x, &y}; }
 
@@ -46,7 +48,7 @@ class PointFigure : public Figure {
 
 /**
  * Отрезок на плоскости L = (p1_id, p2_id)
- * Определяется двумя характерными точками P1=(x1,y1), P2=(x2,y2) (слайд 24 презентации РК6)
+ * p1_id и p2_id — идентификаторы собственного начала и конца отрезка.
  */
 class SegmentFigure : public Figure {
   public:

@@ -72,6 +72,11 @@ EMSCRIPTEN_BINDINGS(editor_api) {
     function(
         "createSegment",
         +[](int p1, int p2, const std::string& label) { return g_api.createSegment(p1, p2, label); });
+    function(
+        "createSegmentAt", +[](double x1, double y1, double x2, double y2, int snap_start, int snap_end,
+                               const std::string& label) {
+            return g_api.createSegmentAt(x1, y1, x2, y2, snap_start, snap_end, label);
+        });
     function("deletePrimitive", +[](int id) { return g_api.deletePrimitive(id); });
     function(
         "applyRestriction",
@@ -83,7 +88,10 @@ EMSCRIPTEN_BINDINGS(editor_api) {
         "updateRestriction",
         +[](int id, double value, double value2) { return g_api.updateRestriction(id, value, value2); });
     function("removeRestriction", +[](int id) { return g_api.removeRestriction(id); });
-    function("queryPoint", +[](double x, double y, double radius) { return g_api.queryPoint(x, y, radius); });
+    function(
+        "queryPoint", +[](double x, double y, double radius, const val& excluded) {
+            return g_api.queryPoint(x, y, radius, cad::wasm::readIds(excluded));
+        });
     function(
         "querySegment", +[](double x, double y, double radius) { return g_api.querySegment(x, y, radius); });
     function("movePoint", &api_move_point);

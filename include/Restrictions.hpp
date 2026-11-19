@@ -1,4 +1,5 @@
 #pragma once
+#include "SparseMatrix.hpp"
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -7,7 +8,7 @@ namespace cad {
 
 /**
  * 9 типов геометрических ограничений (слайды 28–29 презентации РК6):
- * 1. COINCIDENT      - Совпадение двух точек (2 уравнения)
+ * 1. COINCIDENT      - Совпадение двух точек (общие координаты в СЛАУ)
  * 2. DISTANCE        - Расстояние между двумя точками / длина отрезка (1 уравнение)
  * 3. PARALLEL        - Параллельность двух отрезков (1 уравнение)
  * 4. PERPENDICULAR   - Перпендикулярность двух отрезков (1 уравнение)
@@ -53,14 +54,11 @@ struct Restriction {
      * порядков. Все аналитические формулы жестко зашиты в код согласно требованию ТЗ и слайдам 28-31.
      */
     void evaluateAnalytical(
-        const std::vector<double>& X, // текущие координаты X_i = p_i + dp_i
-        const std::unordered_map<int, int>&
-            pointIdToVarIdx,        // point_id -> индекс x в векторе X (y имеет индекс +1)
-        std::vector<double>& f_out, // значения уравнений (1 или 2 шт.)
-        std::vector<std::vector<double>>&
-            df_out, // градиенты каждого уравнения по вектору параметров (размер eqCount x nVars)
-        std::vector<std::vector<std::vector<double>>>&
-            d2f_out // гессианы каждого уравнения (размер eqCount x nVars x nVars)
+        const std::vector<double>& X,                        // текущие координаты X_i = p_i + dp_i
+        const std::unordered_map<int, int>& pointIdToVarIdx, // point_id -> индекс x (y имеет индекс +1)
+        std::vector<double>& f_out,                          // значения уравнений
+        SparseMatrix& df_out,                                // градиенты
+        std::vector<std::map<int, SparseRow>>& d2f_out       // разреженные гессианы
     ) const;
 
     std::string toJson() const;

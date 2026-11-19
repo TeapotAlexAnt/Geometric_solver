@@ -15,8 +15,6 @@ class ApiHandler {
     OptimizeResult last_solve_result;
 
   public:
-    ApiHandler();
-
     GeomRepository& getRepository();
 
     // Render Usecase -> getAllPrimitives
@@ -26,6 +24,9 @@ class ApiHandler {
     int createPoint(double x, double y, const std::string& label = "");
 
     int createSegment(int p1_id, int p2_id, const std::string& label = "");
+
+    int createSegmentAt(double x1, double y1, double x2, double y2, int snap_start = 0, int snap_end = 0,
+                        const std::string& label = "");
 
     bool deletePrimitive(int id);
 
@@ -42,7 +43,7 @@ class ApiHandler {
 
     void replaceSketch(GeomRepository replacement);
 
-    int queryPoint(double x, double y, double radius) const;
+    int queryPoint(double x, double y, double radius, const std::vector<int>& excluded_ids = {}) const;
 
     int querySegment(double x, double y, double radius) const;
 

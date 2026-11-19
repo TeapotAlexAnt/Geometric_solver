@@ -6,7 +6,7 @@ import { RestrictionMeta } from "./restriction-meta.js";
 export function setActiveTool(toolName) {
   uiState.activeTool = toolName;
   uiState.activeConstraintTool = null;
-  uiState.segmentStartPointId = null;
+  uiState.segmentStart = null;
 
   document.querySelectorAll(".tool-btn").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.tool === toolName);
@@ -23,10 +23,10 @@ export function setActiveTool(toolName) {
     hint.textContent = "Кликните в любом месте рабочего поля для добавления новой точки P(x, y).";
   } else if (toolName === "segment") {
     badge.textContent = "Режим: Создание отрезка";
-    hint.textContent = "Кликните по начальной и конечной точкам (или в пустое место для автоматического создания точек).";
+    hint.textContent = "Укажите начало и конец отрезка. Клик по существующей точке добавит ограничение совпадения.";
   } else if (toolName === "delete") {
     badge.textContent = "Режим: Удаление объектов";
-    hint.textContent = "Кликните по любой точке или отрезку для удаления примитива и связанных с ним ограничений.";
+    hint.textContent = "Клик по отрезку или его концу удаляет весь отрезок. Отдельная точка удаляется сама.";
   }
   renderAll();
 }
@@ -215,6 +215,7 @@ export function activateConstraintButton(type) {
 
   // Иначе включаем интерактивный режим пошагового выбора примитивов на холсте
   uiState.activeConstraintTool = type;
+  uiState.segmentStart = null;
   uiState.selectedPointIds = [];
   uiState.selectedSegmentIds = [];
 

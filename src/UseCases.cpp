@@ -12,7 +12,7 @@ namespace cad {
 
 namespace {
 
-void writeArray(std::ostream& out, const std::vector<double>& values) {
+template <typename T> void writeArray(std::ostream& out, const std::vector<T>& values) {
     out << '[';
     for (size_t i = 0; i < values.size(); ++i) {
         if (i) out << ',';
@@ -21,7 +21,7 @@ void writeArray(std::ostream& out, const std::vector<double>& values) {
     out << ']';
 }
 
-void writeArray(std::ostream& out, const std::vector<std::vector<double>>& rows) {
+template <typename T> void writeArray(std::ostream& out, const std::vector<std::vector<T>>& rows) {
     out << '[';
     for (size_t i = 0; i < rows.size(); ++i) {
         if (i) out << ',';
@@ -30,18 +30,30 @@ void writeArray(std::ostream& out, const std::vector<std::vector<double>>& rows)
     out << ']';
 }
 
-} // namespace
-
-ApiHandler::ApiHandler() {
-    last_solve_result.converged = true;
-    last_solve_result.iterations = 0;
-    last_solve_result.max_delta = 0.0;
-    last_solve_result.max_residual = 0.0;
+void writeArray(std::ostream& out, const SparseMatrix& rows) {
+    out << '[';
+    for (size_t i = 0; i < rows.size(); ++i) {
+        if (i) out << ',';
+        out << '[';
+        bool first = true;
+        for (const auto& [column, value] : rows[i]) {
+            if (!first) out << ',';
+            first = false;
+            out << '[' << column << ',' << value << ']';
+        }
+        out << ']';
+    }
+    out << ']';
 }
+
+} // namespace
 
 GeomRepository& ApiHandler::getRepository() { return repo; }
 
 std::string ApiHandler::getAllPrimitives() const {
+    const auto total_vars = static_cast<int>(last_solve_result.final_params.size());
+    const auto total_eqs = static_cast<int>(last_solve_result.final_residuals.size());
+    const int dof = total_vars - total_eqs;
     std::ostringstream ss;
     ss << std::setprecision(std::numeric_limits<double>::max_digits10);
     ss << '{';
@@ -50,8 +62,10 @@ std::string ApiHandler::getAllPrimitives() const {
        << "\"converged\":" << (last_solve_result.converged ? "true" : "false")
        << ",\"iterations\":" << last_solve_result.iterations
        << ",\"max_delta\":" << last_solve_result.max_delta
-       << ",\"max_residual\":" << last_solve_result.max_residual
-       << ",\"dof\":" << HelperFunctions::computeDOF(repo) << ",\"last_jacobian\":";
+       << ",\"max_residual\":" << last_solve_result.max_residual << ",\"dof\":" << dof
+       << ",\"point_groups\":";
+    writeArray(ss, last_solve_result.point_groups);
+    ss << ",\"last_jacobian\":";
     writeArray(ss, last_solve_result.last_jacobian);
     ss << ",\"last_rhs\":";
     writeArray(ss, last_solve_result.last_rhs);
@@ -61,22 +75,30 @@ std::string ApiHandler::getAllPrimitives() const {
     writeArray(ss, last_solve_result.final_residuals);
     ss << ",\"final_gradients\":";
     writeArray(ss, last_solve_result.final_gradients);
-    ss << "},\"dofInfo\":{\"totalVars\":" << repo.points.size() * 2
-       << ",\"totalEqs\":" << HelperFunctions::countEquations(repo)
-       << ",\"dof\":" << HelperFunctions::computeDOF(repo) << "}}";
+    ss << "},\"dofInfo\":{\"totalVars\":" << total_vars << ",\"totalEqs\":" << total_eqs << ",\"dof\":" << dof
+       << "}}";
     return ss.str();
 }
 
 int ApiHandler::createPoint(double x, double y, const std::string& label) {
     if (!std::isfinite(x) || !std::isfinite(y)) return -1;
     auto pt = repo.addPoint(x, y, label);
-    if (!repo.restrictions.empty()) solveSketch();
+    if (!pt) return -1;
+    solveSketch();
     return pt->id;
 }
 
 int ApiHandler::createSegment(int p1_id, int p2_id, const std::string& label) {
     auto seg = repo.addSegment(p1_id, p2_id, label);
+    if (seg) solveSketch();
     return seg ? seg->id : -1;
+}
+
+int ApiHandler::createSegmentAt(double x1, double y1, double x2, double y2, int snap_start, int snap_end,
+                                const std::string& label) {
+    const auto segment = repo.addSegment(x1, y1, x2, y2, label, snap_start, snap_end);
+    if (segment) solveSketch();
+    return segment ? segment->id : -1;
 }
 
 bool ApiHandler::deletePrimitive(int id) {
@@ -96,7 +118,7 @@ int ApiHandler::applyRestriction(int type_code, const std::vector<int>& p_ids,
     r.value2 = val2;
     if (!repo.isValidRestriction(r)) return -1;
     int rid = repo.addRestriction(r);
-    last_solve_result = GeomSolver::solve(repo);
+    if (rid > 0) solveSketch();
     return rid;
 }
 
@@ -130,8 +152,8 @@ void ApiHandler::replaceSketch(GeomRepository replacement) {
     last_solve_result = std::move(result);
 }
 
-int ApiHandler::queryPoint(double x, double y, double radius) const {
-    return HelperFunctions::queryPointAt(repo, x, y, radius);
+int ApiHandler::queryPoint(double x, double y, double radius, const std::vector<int>& excluded_ids) const {
+    return HelperFunctions::queryPointAt(repo, x, y, radius, excluded_ids);
 }
 
 int ApiHandler::querySegment(double x, double y, double radius) const {

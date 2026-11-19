@@ -5,7 +5,7 @@ export const uiState = {
   selectedSegmentIds: [],
   hoveredPointId: null,
   hoveredSegmentId: null,
-  segmentStartPointId: null,
+  segmentStart: null,
   draggingPointId: null,
   draggingSegmentId: null,
   dragLastWorld: { x: 0, y: 0 },

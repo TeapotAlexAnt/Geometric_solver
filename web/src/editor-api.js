@@ -18,7 +18,8 @@ function getAllPrimitives() {
   if (snapshot) return snapshot;
 
   const state = JSON.parse(backend.getAllPrimitives());
-  const points = state.primitives.filter(item => item.type === "point");
+  const points = state.primitives.filter(item => item.type === "point" || item.type === "endpoint");
+  const standalonePoints = points.filter(point => point.type === "point");
   const pointById = new Map(points.map(point => [point.id, point]));
   const segments = state.primitives.filter(item => item.type === "line").map(segment => ({
     ...segment,
@@ -29,6 +30,7 @@ function getAllPrimitives() {
   const details = [];
   const { final_residuals: residuals, final_gradients: gradients } = state.solver;
   const restrictions = state.restrictions.map(item => {
+    if (item.type === "COINCIDENT") return { ...item, residual: 0 };
     const count = RestrictionMeta[item.type].eqs;
     const row = details.length;
     const residual = Math.max(...residuals.slice(row, row + count).map(Math.abs), 0);
@@ -47,9 +49,14 @@ function getAllPrimitives() {
   snapshot = {
     ...state,
     points,
+    standalonePoints,
     segments,
     restrictions,
-    solver: { ...state.solver, eq_details: details }
+    solver: {
+      ...state.solver,
+      eq_details: details,
+      variableLabels: state.solver.point_groups.map(ids => ids.map(id => pointById.get(id).label).join(" = "))
+    }
   };
   return snapshot;
 }
@@ -58,12 +65,15 @@ export const api = {
   getAllPrimitives,
   findPoint: id => getAllPrimitives().points.find(point => point.id === id),
   findSegment: id => getAllPrimitives().segments.find(segment => segment.id === id),
-  createPoint: (x, y) => update("createPoint", x, y, `P${getAllPrimitives().points.length + 1}`),
-  createSegment: (start, end) => update("createSegment", start, end, `L${getAllPrimitives().segments.length + 1}`),
+  createPoint: (x, y) => update("createPoint", x, y, `P${getAllPrimitives().standalonePoints.length + 1}`),
+  createSegment: (start, end) => update(
+    "createSegmentAt", start.x, start.y, end.x, end.y, start.id ?? 0, end.id ?? 0,
+    `L${getAllPrimitives().segments.length + 1}`
+  ),
   deletePrimitive: id => update("deletePrimitive", id),
   movePoint: (id, x, y) => update("movePoint", id, x, y),
   moveSegment: (id, dx, dy) => update("moveSegment", id, dx, dy),
-  queryPoint: (x, y, radius) => api.findPoint(backend.queryPoint(x, y, radius)),
+  queryPoint: (x, y, radius, excluded = []) => api.findPoint(backend.queryPoint(x, y, radius, excluded)),
   querySegment: (x, y, radius) => api.findSegment(backend.querySegment(x, y, radius)),
   applyRestriction: (type, points, segments, value = 0, value2 = 0) =>
     update("applyRestriction", RestrictionMeta[type].code, points, segments, value, value2),

@@ -1,6 +1,7 @@
 #include "GeomRepository.hpp"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <sstream>
 
 namespace cad {
@@ -13,6 +14,7 @@ void GeomRepository::clear() {
 }
 
 std::shared_ptr<PointFigure> GeomRepository::addPoint(double x, double y, const std::string& label) {
+    if (next_id == std::numeric_limits<int>::max()) return nullptr;
     int id = next_id++;
     auto pt = std::make_shared<PointFigure>(id, x, y, label);
     points.push_back(pt);
@@ -20,24 +22,45 @@ std::shared_ptr<PointFigure> GeomRepository::addPoint(double x, double y, const 
 }
 
 std::shared_ptr<SegmentFigure> GeomRepository::addSegment(int p1_id, int p2_id, const std::string& label) {
-    PointFigure* r1 = findPoint(p1_id);
-    PointFigure* r2 = findPoint(p2_id);
-    if (!r1 || !r2 || p1_id == p2_id) return nullptr;
-    for (const auto& segment : segments) {
-        if ((segment->p1_id == p1_id && segment->p2_id == p2_id) ||
-            (segment->p1_id == p2_id && segment->p2_id == p1_id)) {
-            return segment;
-        }
+    if (p1_id <= 0 || p2_id <= 0) return nullptr;
+    return addSegment(0, 0, 0, 0, label, p1_id, p2_id);
+}
+
+std::shared_ptr<SegmentFigure> GeomRepository::addSegment(double x1, double y1, double x2, double y2,
+                                                          const std::string& label, int snap_start,
+                                                          int snap_end) {
+    const auto* first = findPoint(snap_start);
+    const auto* last = findPoint(snap_end);
+    if ((snap_start && !first) || (snap_end && !last) || (first && first == last)) return nullptr;
+    if (first) {
+        x1 = first->x;
+        y1 = first->y;
+    }
+    if (last) {
+        x2 = last->x;
+        y2 = last->y;
+    }
+    if (!std::isfinite(x1) || !std::isfinite(y1) || !std::isfinite(x2) || !std::isfinite(y2) ||
+        next_id > std::numeric_limits<int>::max() - 3 - (first != nullptr) - (last != nullptr)) {
+        return nullptr;
     }
     int id = next_id++;
-    auto seg = std::make_shared<SegmentFigure>(id, p1_id, p2_id, r1, r2, label);
+    const auto name = label.empty() ? "L" + std::to_string(id) : label;
+    auto start = std::make_shared<PointFigure>(next_id++, x1, y1, name + ".1", id);
+    auto end = std::make_shared<PointFigure>(next_id++, x2, y2, name + ".2", id);
+    auto seg = std::make_shared<SegmentFigure>(id, start->id, end->id, start.get(), end.get(), name);
+    points.push_back(start);
+    points.push_back(end);
     segments.push_back(seg);
+    if (first) addRestriction({0, RestrictionType::COINCIDENT, {start->id, first->id}, {}, 0, 0});
+    if (last) addRestriction({0, RestrictionType::COINCIDENT, {end->id, last->id}, {}, 0, 0});
     return seg;
 }
 
 int GeomRepository::addRestriction(const Restriction& r) {
     Restriction copy = r;
     if (copy.id <= 0) {
+        if (next_id == std::numeric_limits<int>::max()) return -1;
         copy.id = next_id++;
     }
     restrictions.push_back(copy);
@@ -53,44 +76,31 @@ bool GeomRepository::removeRestriction(int rid) {
 }
 
 bool GeomRepository::removePrimitive(int id) {
-    // Если удаляется отрезок
-    auto sit = std::remove_if(segments.begin(), segments.end(),
-                              [id](const std::shared_ptr<SegmentFigure>& s) { return s->id == id; });
-    if (sit != segments.end()) {
-        segments.erase(sit, segments.end());
-        // Удаляем ограничения, ссылающиеся на этот отрезок
-        restrictions.erase(std::remove_if(restrictions.begin(), restrictions.end(),
-                                          [id](const Restriction& r) {
-                                              return std::find(r.seg_ids.begin(), r.seg_ids.end(), id) !=
-                                                     r.seg_ids.end();
-                                          }),
-                           restrictions.end());
-        return true;
-    }
+    const auto* point = findPoint(id);
+    if (point && point->segment_id) return removePrimitive(point->segment_id);
 
-    // Если удаляется точка — сначала удаляем инцидентные отрезки и ограничения
-    auto pit = std::find_if(points.begin(), points.end(),
-                            [id](const std::shared_ptr<PointFigure>& p) { return p->id == id; });
-    if (pit != points.end()) {
-        std::vector<int> segs_to_remove;
-        for (const auto& s : segments) {
-            if (s->p1_id == id || s->p2_id == id) {
-                segs_to_remove.push_back(s->id);
-            }
-        }
-        for (int sid : segs_to_remove) {
-            removePrimitive(sid);
-        }
-        restrictions.erase(std::remove_if(restrictions.begin(), restrictions.end(),
-                                          [id](const Restriction& r) {
-                                              return std::find(r.p_ids.begin(), r.p_ids.end(), id) !=
-                                                     r.p_ids.end();
-                                          }),
-                           restrictions.end());
-        points.erase(pit);
-        return true;
+    int start_id = id;
+    int end_id = id;
+    if (!point) {
+        const auto segment =
+            std::find_if(segments.begin(), segments.end(), [id](const auto& s) { return s->id == id; });
+        if (segment == segments.end()) return false;
+        start_id = (*segment)->p1_id;
+        end_id = (*segment)->p2_id;
+        segments.erase(segment);
     }
-    return false;
+    const auto removesPoint = [=](int pid) { return pid == start_id || pid == end_id; };
+    restrictions.erase(std::remove_if(restrictions.begin(), restrictions.end(),
+                                      [&](const Restriction& r) {
+                                          return std::any_of(r.p_ids.begin(), r.p_ids.end(), removesPoint) ||
+                                                 std::find(r.seg_ids.begin(), r.seg_ids.end(), id) !=
+                                                     r.seg_ids.end();
+                                      }),
+                       restrictions.end());
+    points.erase(
+        std::remove_if(points.begin(), points.end(), [&](const auto& p) { return removesPoint(p->id); }),
+        points.end());
+    return true;
 }
 
 PointFigure* GeomRepository::findPoint(int id) const {
@@ -116,13 +126,6 @@ bool GeomRepository::isValidRestriction(const Restriction& r) const {
     }
     return std::all_of(r.p_ids.begin(), r.p_ids.end(), [&](int id) { return findPoint(id); }) &&
            std::all_of(r.seg_ids.begin(), r.seg_ids.end(), [&](int id) { return findSegment(id); });
-}
-
-void GeomRepository::relinkSegments() {
-    for (auto& s : segments) {
-        s->p1_ref = findPoint(s->p1_id);
-        s->p2_ref = findPoint(s->p2_id);
-    }
 }
 
 void GeomRepository::writeJsonFields(std::ostream& out) const {

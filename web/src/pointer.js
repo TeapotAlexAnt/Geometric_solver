@@ -21,7 +21,17 @@ export function bindPointerEvents() {
 
     const world = screenToWorld(sx, sy);
     const hitRadiusWorld = 11 / uiState.camera.scale;
-    const hitPt = api.queryPoint(world.x, world.y, hitRadiusWorld);
+    let hitPt = api.queryPoint(world.x, world.y, hitRadiusWorld);
+    if (hitPt) {
+      const selected = uiState.selectedPointIds;
+      if ((uiState.activeConstraintTool || (uiState.activeTool === "select" && e.shiftKey)) &&
+          selected.includes(hitPt.id)) {
+        hitPt = api.queryPoint(world.x, world.y, hitRadiusWorld, selected) ?? hitPt;
+      } else if (uiState.activeTool === "select" && !uiState.activeConstraintTool && !e.shiftKey) {
+        const selectedAtHit = selected.map(api.findPoint).filter(point => point?.x === hitPt.x && point.y === hitPt.y);
+        hitPt = selectedAtHit.at(-1) ?? hitPt;
+      }
+    }
     const hitSeg = !hitPt ? api.querySegment(world.x, world.y, 8 / uiState.camera.scale) : null;
 
     // Если активен режим выбора объектов для наложения ограничения
@@ -43,15 +53,13 @@ export function bindPointerEvents() {
     }
 
     if (uiState.activeTool === "segment") {
-      let pt = hitPt;
-      if (!pt) {
-        pt = api.findPoint(api.createPoint(world.x, world.y));
-      }
-      if (uiState.segmentStartPointId === null) {
-        uiState.segmentStartPointId = pt.id;
-      } else if (uiState.segmentStartPointId !== pt.id) {
-        api.createSegment(uiState.segmentStartPointId, pt.id);
-        uiState.segmentStartPointId = null;
+      const point = hitPt ?? world;
+      const pending = uiState.segmentStart;
+      const start = pending?.id ? api.findPoint(pending.id) : pending;
+      if (!start) {
+        uiState.segmentStart = point;
+      } else if ((start.x !== point.x || start.y !== point.y) && api.createSegment(start, point) > 0) {
+        uiState.segmentStart = null;
       }
       renderAll();
       return;
@@ -142,7 +150,7 @@ export function bindPointerEvents() {
     const hoverChanged = pointId !== uiState.hoveredPointId || segmentId !== uiState.hoveredSegmentId;
     uiState.hoveredPointId = pointId;
     uiState.hoveredSegmentId = segmentId;
-    if (hoverChanged || uiState.segmentStartPointId !== null) renderSketch();
+    if (hoverChanged || uiState.segmentStart !== null) renderSketch();
   });
 
   function endDrag(e) {

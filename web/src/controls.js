@@ -39,7 +39,7 @@ export function bindControls() {
     api.clearSketch();
     uiState.selectedPointIds = [];
     uiState.selectedSegmentIds = [];
-    uiState.segmentStartPointId = null;
+    uiState.segmentStart = null;
     renderAll();
     showToast("Рабочее поле очищено");
   });
@@ -155,7 +155,7 @@ export function bindControls() {
       api.loadSketch(JSON.parse(area.value));
       uiState.selectedPointIds = [];
       uiState.selectedSegmentIds = [];
-      uiState.segmentStartPointId = null;
+      uiState.segmentStart = null;
       renderAll();
       showToast("Эскиз загружен из JSON");
     } catch (err) {
